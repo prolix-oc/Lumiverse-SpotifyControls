@@ -1,0 +1,12 @@
+{
+  "identifier": "spotify_controls",
+  "version": "1.0.0",
+  "name": "Spotify Controls",
+  "author": "Lumiverse",
+  "github": "https://github.com/example/lumiverse-spotify-controls",
+  "homepage": "https://github.com/example/lumiverse-spotify-controls",
+  "description": "Control Spotify playback, view now playing, search tracks, and integrate with LLM prompts.",
+  "permissions": ["cors_proxy", "tools", "ui_panels", "oauth"],
+  "entry_backend": "dist/backend.js",
+  "entry_frontend": "dist/frontend.js"
+}
