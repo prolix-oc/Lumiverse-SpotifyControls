@@ -277,7 +277,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         const existing = await loadConfig(userId);
         await saveConfig({ clientId, clientSecret, lastfmApiKey: existing.lastfmApiKey }, userId);
 
-        const state = crypto.randomUUID();
+        const state = await spindle.oauth.createState();
         // Spotify rejects "localhost" in redirect URIs — use IPv6 loopback [::1]
         const baseUrl = serverBaseUrl.replace("://localhost", "://[::1]");
         const redirectUri = baseUrl + spindle.oauth.getCallbackUrl();
