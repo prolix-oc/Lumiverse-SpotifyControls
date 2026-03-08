@@ -1,6 +1,6 @@
 {
   "name": "lumiverse-spotify-controls",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "lumiverse-spindle-types": "file:../lumiverse-spindle-types",
+    "lumiverse-spindle-types": "0.1.2",
     "typescript": "^5.7.3"
   }
 }
