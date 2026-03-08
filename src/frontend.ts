@@ -7,6 +7,7 @@ import { createControlsUI } from "./ui/controls";
 import { createSearchUI } from "./ui/search";
 import { createMiniPlayerUI } from "./ui/mini-player";
 import { createCrossfadeArt } from "./ui/crossfade-art";
+import { createPermissionModal, PERMISSION_MODAL_CSS } from "./ui/permission-modal";
 
 const SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 const MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
@@ -15,7 +16,7 @@ export function setup(ctx: SpindleFrontendContext) {
   const cleanups: (() => void)[] = [];
 
   // Add styles
-  const removeStyle = ctx.dom.addStyle(PANEL_CSS);
+  const removeStyle = ctx.dom.addStyle(PANEL_CSS + PERMISSION_MODAL_CSS);
   cleanups.push(removeStyle);
 
   // State
@@ -431,7 +432,7 @@ export function setup(ctx: SpindleFrontendContext) {
         break;
 
       case "config":
-        settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey);
+        settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey, msg.callbackUrl);
         connected = msg.connected;
         break;
 
@@ -494,6 +495,26 @@ export function setup(ctx: SpindleFrontendContext) {
     }
   });
   cleanups.push(msgUnsub);
+
+  // ─── Permission gate ─────────────────────────────────────────────────
+
+  let permModal: ReturnType<typeof createPermissionModal> | null = null;
+
+  ctx.permissions.getGranted().then((granted) => {
+    if (granted.includes("cors_proxy")) return;
+
+    permModal = createPermissionModal(
+      async () => {
+        await ctx.permissions.request(["cors_proxy"]);
+        // Extension will restart after the grant — this is expected
+      },
+      () => {
+        // User dismissed — they can still browse settings, just API calls won't work
+        permModal = null;
+      }
+    );
+    cleanups.push(() => permModal?.destroy());
+  });
 
   // ─── Request initial state ───────────────────────────────────────────
 

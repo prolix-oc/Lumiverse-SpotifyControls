@@ -1,6 +1,6 @@
 export interface SettingsUI {
   root: HTMLElement;
-  update(connected: boolean, clientId: string, hasSecret?: boolean, hasLastfmKey?: boolean): void;
+  update(connected: boolean, clientId: string, hasSecret?: boolean, hasLastfmKey?: boolean, callbackPath?: string): void;
   setConnecting(): void;
   destroy(): void;
 }
@@ -76,6 +76,48 @@ export function createSettingsUI(
   });
   lastfmRow.appendChild(lastfmBtn);
 
+  // Callback URL (copyable)
+  const callbackLabel = document.createElement("label");
+  callbackLabel.className = "spotify-settings-label";
+  callbackLabel.textContent = "Redirect URI";
+
+  const callbackRow = document.createElement("div");
+  callbackRow.className = "spotify-settings-row";
+  callbackRow.style.gap = "6px";
+
+  const callbackInput = document.createElement("input");
+  callbackInput.className = "spotify-input";
+  callbackInput.type = "text";
+  callbackInput.readOnly = true;
+  callbackInput.placeholder = "Loading...";
+  callbackInput.style.flex = "1";
+  callbackInput.style.cursor = "text";
+  callbackInput.style.userSelect = "all";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "spotify-btn spotify-btn-primary";
+  copyBtn.textContent = "Copy";
+  copyBtn.style.fontSize = "0.85em";
+  copyBtn.style.padding = "4px 12px";
+  copyBtn.style.flexShrink = "0";
+  copyBtn.addEventListener("click", () => {
+    if (!callbackInput.value) return;
+    navigator.clipboard.writeText(callbackInput.value).then(() => {
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = prev; }, 1500);
+    });
+  });
+
+  callbackRow.appendChild(callbackInput);
+  callbackRow.appendChild(copyBtn);
+  callbackLabel.appendChild(callbackRow);
+
+  const callbackHint = document.createElement("div");
+  callbackHint.style.cssText = "font-size:0.8em;opacity:0.6;margin-top:2px";
+  callbackHint.textContent = "Add this as a Redirect URI in your Spotify app settings.";
+  callbackLabel.appendChild(callbackHint);
+
   // Actions row
   const btnRow = document.createElement("div");
   btnRow.className = "spotify-settings-row";
@@ -88,6 +130,7 @@ export function createSettingsUI(
 
   body.appendChild(idLabel);
   body.appendChild(secretLabel);
+  body.appendChild(callbackLabel);
   body.appendChild(lastfmLabel);
   body.appendChild(lastfmRow);
   body.appendChild(btnRow);
@@ -97,10 +140,16 @@ export function createSettingsUI(
 
   let connected = false;
 
-  function updateUI(isConnected: boolean, clientId: string, hasSecret?: boolean, hasLastfmKey?: boolean) {
+  function updateUI(isConnected: boolean, clientId: string, hasSecret?: boolean, hasLastfmKey?: boolean, callbackPath?: string) {
     connected = isConnected;
     if (clientId) {
       idInput.value = clientId;
+    }
+
+    // Assemble full callback URL from the window origin + spindle oauth path
+    if (callbackPath) {
+      const baseUrl = getServerBaseUrl();
+      callbackInput.value = baseUrl + callbackPath;
     }
 
     if (isConnected) {
