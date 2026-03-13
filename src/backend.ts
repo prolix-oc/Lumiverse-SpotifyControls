@@ -527,11 +527,16 @@ spindle.registerTool({
 spindle.registerTool({
   name: "spotify_mood_discover",
   display_name: "Mood-Based Music Discovery",
-  description: "Discover music matching the current mood/atmosphere but with deliberate variety — finds tracks that share the emotional tone of what's playing (or the scene's tone) but from different artists and genres. Uses Last.fm's crowd-sourced mood tags to find diverse, mood-matching tracks rather than 'more of the same'. Requires a track to be currently playing and a Last.fm API key.",
+  description: "Discover music matching a specific mood/atmosphere with deliberate variety — finds tracks from different artists and genres that share the emotional tone. Uses Last.fm's crowd-sourced mood tags for discovery. Requires a track to be currently playing and a Last.fm API key.",
   council_eligible: true,
   parameters: {
     type: "object",
-    properties: {},
+    properties: {
+      mood: {
+        type: "string",
+        description: "Comma-separated mood/atmosphere descriptors matching the scene's emotional tone. Be specific and faithful to the scene — e.g. 'romantic, tender, gentle' for a love scene; 'playful, lighthearted, warm' for a meet-cute or comedic beat; 'melancholic, bittersweet, nostalgic' for a farewell; 'dark, brooding, ominous' for menace; 'chill, mellow, dreamy' for a quiet moment. Avoid defaulting to 'epic' or 'cinematic' — only use those for genuinely grand, sweeping moments like battles or revelations.",
+      },
+    },
     required: [],
   },
 });
@@ -592,6 +597,9 @@ const MOOD_TAG_SET = new Set([
   // Scene
   "night", "summer", "rainy", "morning", "sensual", "introspective",
   "contemplative", "spiritual", "meditative", "nocturnal",
+  // Softer / lighter tones (meet-cute, comedy, warmth)
+  "warm", "sweet", "cute", "lighthearted", "carefree", "innocent",
+  "hopeful", "heartwarming", "cozy", "breezy",
 ]);
 
 /** Maps extracted mood categories (from MOOD_KEYWORDS) to concrete Last.fm
@@ -607,6 +615,20 @@ const MOOD_TO_LASTFM_TAGS: Record<string, string[]> = {
   joyful:      ["happy", "joyful", "cheerful", "upbeat", "fun", "euphoric"],
   intense:     ["aggressive", "energetic", "intense", "fierce", "furious"],
   ethereal:    ["dreamy", "ethereal", "atmospheric", "hypnotic", "meditative"],
+  // Extended categories for LLM-supplied mood descriptors
+  warm:          ["warm", "gentle", "tender", "heartfelt", "soothing", "cozy"],
+  lighthearted:  ["fun", "playful", "cheerful", "upbeat", "happy", "whimsical", "carefree"],
+  sweet:         ["romantic", "tender", "gentle", "love", "heartfelt", "sweet", "innocent"],
+  nostalgic:     ["nostalgic", "bittersweet", "wistful", "sentimental", "melancholic"],
+  suspenseful:   ["intense", "dark", "anxious", "driving", "ominous"],
+  melancholic:   ["melancholy", "melancholic", "sad", "bittersweet", "gloomy"],
+  hopeful:       ["hopeful", "uplifting", "gentle", "warm", "tender"],
+  playful:       ["playful", "fun", "upbeat", "whimsical", "groovy", "lighthearted"],
+  tender:        ["tender", "gentle", "romantic", "heartfelt", "love", "sweet"],
+  brooding:      ["brooding", "dark", "moody", "introspective", "nocturnal"],
+  mellow:        ["mellow", "chill", "relaxing", "laid-back", "soothing"],
+  dreamy:        ["dreamy", "ethereal", "hypnotic", "atmospheric", "psychedelic"],
+  gentle:        ["gentle", "tender", "soft", "calm", "soothing", "warm"],
 };
 
 /** Extract mood-related tags from a track/artist's Last.fm tag list. */
@@ -799,29 +821,50 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         return "Nothing is currently playing. Play something first so we can discover mood-matching music.";
       }
 
-      // ── Batch 1: Fetch ALL Last.fm data in one parallel burst ─────
-      // Includes artist tags as a fallback so we never need a sequential retry
+      // ── Resolve mood tags ────────────────────────────────────────
+      // Priority: explicit mood arg > context extraction > track tags > artist tags
+      let moodTags: string[] = [];
+      const moodArg = args.mood as string | undefined;
+
+      if (moodArg) {
+        // LLM provided explicit mood descriptors — map each to Last.fm tags
+        const terms = moodArg.split(/[,\s]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
+        for (const term of terms) {
+          const mapped = MOOD_TO_LASTFM_TAGS[term];
+          if (mapped) {
+            moodTags.push(...mapped);
+          } else if (MOOD_TAG_SET.has(term)) {
+            moodTags.push(term);
+          }
+        }
+        moodTags = [...new Set(moodTags)];
+      }
+
+      // Fallback: extract from scene context, then from track/artist tags
+      if (moodTags.length === 0 && context) {
+        const moodStr = extractMoodFromContext(context);
+        if (moodStr) {
+          for (const mood of moodStr.split(" ")) {
+            const mapped = MOOD_TO_LASTFM_TAGS[mood];
+            if (mapped) moodTags.push(...mapped);
+          }
+          moodTags = [...new Set(moodTags)];
+        }
+      }
+
+      // ── Batch 1: Fetch Last.fm data in parallel ────────────────
+      // Always fetch similar artists (for the variety blocklist).
+      // Fetch track/artist tags only if we still need mood signals.
+      const needTagFallback = moodTags.length === 0;
       const [trackTags, artistTags, similarArtists] = await Promise.all([
-        spotify.getTrackTopTags(state.trackName, state.artistName).catch(() => []),
-        spotify.getArtistTopTags(state.artistName).catch(() => []),
+        needTagFallback ? spotify.getTrackTopTags(state.trackName, state.artistName).catch(() => []) : Promise.resolve([]),
+        needTagFallback ? spotify.getArtistTopTags(state.artistName).catch(() => []) : Promise.resolve([]),
         spotify.getSimilarArtists(state.artistName, 5).catch(() => []),
       ]);
 
-      // Extract mood tags from track, falling back to artist
-      let moodTags = extractMoodTags(trackTags);
-      if (moodTags.length === 0) moodTags = extractMoodTags(artistTags, 0);
-
-      // Merge with scene context mood tags (council invocations)
-      if (council && context) {
-        const moodStr = extractMoodFromContext(context);
-        if (moodStr) {
-          const contextTags: string[] = [];
-          for (const mood of moodStr.split(" ")) {
-            const mapped = MOOD_TO_LASTFM_TAGS[mood];
-            if (mapped) contextTags.push(...mapped);
-          }
-          moodTags = [...new Set([...contextTags, ...moodTags])];
-        }
+      if (needTagFallback) {
+        moodTags = extractMoodTags(trackTags);
+        if (moodTags.length === 0) moodTags = extractMoodTags(artistTags, 0);
       }
 
       if (moodTags.length === 0) {
@@ -916,7 +959,8 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       const queueLine = queued.length > 0
         ? `\n\nQueued ${queued.length} varied tracks:\n${queued.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
         : "";
-      const prefix = council ? `[Mood discovery: ${moodDesc}] ` : "";
+      // Show prefix for council invocations (mood arg implies council context too)
+      const prefix = (council || (moodArg && context)) ? `[Mood discovery: ${moodDesc}] ` : "";
       return `${prefix}Now playing "${resolved[0].name}" by ${resolved[0].artist} (mood: ${moodDesc}, varied from "${state.trackName}")${queueLine}`;
     } catch (err: any) {
       if (err?.message?.includes("Last.fm API key not configured")) {
