@@ -479,6 +479,17 @@ spindle.registerMacro({
 
 // ─── LLM Tools ───────────────────────────────────────────────────────────
 
+// Unregister first so hot-reloads / re-evaluations don't create duplicates
+const TOOL_NAMES = [
+  "spotify_search",
+  "spotify_queue",
+  "spotify_find_playlist",
+  "spotify_play",
+  "spotify_playlist_tracks",
+  "spotify_recommend",
+] as const;
+for (const name of TOOL_NAMES) spindle.unregisterTool(name);
+
 spindle.registerTool({
   name: "spotify_search",
   display_name: "Spotify Search",
