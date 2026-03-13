@@ -624,6 +624,13 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   const council = isCouncilInvocation(args);
   const context: string = (args.context as string) || "";
 
+  // Tool invocations don't carry a userId, so tokens may not be loaded yet
+  // (e.g. after a hot reload before the frontend reconnects). Try to load
+  // them if we have a previously-set activeUserId.
+  if (!spotify.isConnected()) {
+    await spotify.loadTokens();
+  }
+
   // ── spotify_search: search + play pipeline ──────────────────────────
   if (toolName === "spotify_search") {
     try {
