@@ -483,6 +483,7 @@ spindle.registerTool({
   name: "spotify_search",
   display_name: "Spotify Search",
   description: "Search for tracks on Spotify. Returns track names, artists, albums, and URIs.",
+  council_eligible: true,
   parameters: {
     type: "object",
     properties: {
@@ -496,6 +497,7 @@ spindle.registerTool({
   name: "spotify_queue",
   display_name: "Spotify Queue",
   description: "Add a track to the Spotify playback queue by its URI.",
+  council_eligible: true,
   parameters: {
     type: "object",
     properties: {
@@ -512,6 +514,7 @@ spindle.registerTool({
   name: "spotify_find_playlist",
   display_name: "Find Spotify Playlist",
   description: "Search for Spotify playlists using 3-4 words describing the atmosphere, mood, or tone of a scene. Returns matching playlists that can be played with spotify_play.",
+  council_eligible: true,
   parameters: {
     type: "object",
     properties: {
@@ -525,6 +528,7 @@ spindle.registerTool({
   name: "spotify_play",
   display_name: "Spotify Play",
   description: "Start playback of a Spotify track, playlist, or album by URI.",
+  council_eligible: true,
   parameters: {
     type: "object",
     properties: {
@@ -538,6 +542,7 @@ spindle.registerTool({
   name: "spotify_playlist_tracks",
   display_name: "Spotify Playlist Tracks",
   description: "Preview the tracks in a Spotify playlist before playing it.",
+  council_eligible: true,
   parameters: {
     type: "object",
     properties: {
@@ -551,6 +556,7 @@ spindle.registerTool({
   name: "spotify_recommend",
   display_name: "Music Recommendations",
   description: "Get music recommendations via Last.fm. Modes: 'similar_tracks' (find tracks like a given one), 'similar_artists' (find artists like a given one), 'tag_top_tracks' (top tracks for a genre/mood tag like 'dark ambient', 'synthwave', 'chill').",
+  council_eligible: true,
   parameters: {
     type: "object",
     properties: {
@@ -563,46 +569,145 @@ spindle.registerTool({
   },
 });
 
+// ─── Council context helpers ─────────────────────────────────────────────
+
+/** Mood/atmosphere vocabulary grouped by broad categories. Used to extract
+ *  searchable terms from raw story context when the council invokes a tool
+ *  without explicit arguments. */
+const MOOD_KEYWORDS: Record<string, string[]> = {
+  dark:        ["dark", "shadow", "grim", "ominous", "dread", "sinister", "bleak", "foreboding", "menacing", "eerie"],
+  tense:       ["tense", "suspense", "anxious", "nervous", "uneasy", "danger", "threat", "urgent", "panic", "fear"],
+  sad:         ["sad", "grief", "mourn", "sorrow", "lonely", "melancholy", "loss", "cry", "tears", "heartbreak"],
+  romantic:    ["love", "kiss", "tender", "intimate", "passion", "embrace", "romantic", "heart", "gentle", "longing"],
+  epic:        ["battle", "war", "fight", "sword", "army", "charge", "clash", "siege", "conquest", "glory"],
+  peaceful:    ["calm", "quiet", "serene", "peaceful", "gentle", "rest", "tranquil", "still", "soft", "meadow"],
+  mysterious:  ["mystery", "secret", "hidden", "enigma", "strange", "curious", "ancient", "forgotten", "cryptic", "arcane"],
+  joyful:      ["happy", "joy", "laugh", "celebrate", "cheer", "bright", "warm", "smile", "delight", "playful"],
+  intense:     ["intense", "fierce", "rage", "fury", "storm", "roar", "crash", "fire", "burn", "blaze"],
+  ethereal:    ["dream", "ethereal", "celestial", "spirit", "ghost", "divine", "heavenly", "astral", "mystic", "void"],
+};
+
+/** Score a context string against mood categories and return the top N mood
+ *  descriptors suitable for a Spotify/Last.fm search query. */
+function extractMoodFromContext(context: string, topN = 3): string {
+  if (!context) return "";
+  const lower = context.toLowerCase();
+  const scores: [string, number][] = [];
+
+  for (const [mood, words] of Object.entries(MOOD_KEYWORDS)) {
+    let score = 0;
+    for (const w of words) {
+      // Count occurrences (rough — word boundary isn't critical here)
+      const idx = lower.indexOf(w);
+      if (idx !== -1) score++;
+      // Extra weight if it appears multiple times
+      let pos = idx;
+      while (pos !== -1) {
+        pos = lower.indexOf(w, pos + w.length);
+        if (pos !== -1) score += 0.5;
+      }
+    }
+    if (score > 0) scores.push([mood, score]);
+  }
+
+  scores.sort((a, b) => b[1] - a[1]);
+  return scores.slice(0, topN).map(([mood]) => mood).join(" ");
+}
+
+/** Check whether this invocation came from the council (has context but no
+ *  explicit user-supplied args). */
+function isCouncilInvocation(args: Record<string, unknown> | undefined): boolean {
+  if (!args) return false;
+  // Council invocations carry a `context` key injected by the backend;
+  // direct LLM tool calls pass explicit parameters like query, uri, mode, etc.
+  const keys = Object.keys(args);
+  return keys.length === 1 && keys[0] === "context";
+}
+
+// ─── Tool invocation handler ────────────────────────────────────────────
+
 // Handle tool invocations via events
 spindle.on("TOOL_INVOCATION", async (payload: any) => {
   if (!payload?.toolName || !payload?.requestId) return;
 
-  if (payload.toolName === "spotify_search") {
+  // The council passes qualified names like "spotify_controls:spotify_search",
+  // while direct LLM tool calls use bare names like "spotify_search".
+  // Strip the extension prefix if present so handlers match either form.
+  const rawName = payload.toolName;
+  const toolName = rawName.includes(":") ? rawName.split(":").pop()! : rawName;
+  const args: Record<string, unknown> = payload.args ?? {};
+  const council = isCouncilInvocation(args);
+  const context: string = (args.context as string) || "";
+
+  if (toolName === "spotify_search") {
     try {
-      const results = await spotify.search(payload.args?.query || "");
+      let query = args.query as string | undefined;
+      if (!query && council) {
+        query = extractMoodFromContext(context) + " soundtrack";
+        if (query.trim() === "soundtrack") query = "ambient soundtrack";
+      }
+      const results = await spotify.search(query || "");
       const formatted = results
         .map((r, i) => `${i + 1}. "${r.name}" by ${r.artist} (${r.album}) — ${r.uri}`)
         .join("\n");
+      if (council) {
+        return `[Searched Spotify for "${query}"]\n${formatted || "No results found."}`;
+      }
       return formatted || "No results found.";
     } catch (err: any) {
       return `Search failed: ${err?.message}`;
     }
   }
 
-  if (payload.toolName === "spotify_queue") {
+  if (toolName === "spotify_queue") {
     try {
-      await spotify.addToQueue(payload.args?.uri || "");
+      const uri = args.uri as string | undefined;
+      if (!uri && council) {
+        return "Cannot queue a track without a URI. Use spotify_find_playlist or spotify_search first to discover tracks.";
+      }
+      await spotify.addToQueue(uri || "");
       return "Track added to queue.";
     } catch (err: any) {
       return `Failed to queue track: ${err?.message}`;
     }
   }
 
-  if (payload.toolName === "spotify_find_playlist") {
+  if (toolName === "spotify_find_playlist") {
     try {
-      const results = await spotify.searchPlaylists(payload.args?.query || "");
+      let query = args.query as string | undefined;
+      if (!query && council) {
+        query = extractMoodFromContext(context);
+        if (!query) query = "ambient";
+      }
+      const results = await spotify.searchPlaylists(query || "");
       const formatted = results
         .map((r, i) => `${i + 1}. "${r.name}" by ${r.owner} (${r.trackCount} tracks) — ${r.uri}`)
         .join("\n");
+      if (council) {
+        return `[Searched playlists for "${query}"]\n${formatted || "No playlists found."}`;
+      }
       return formatted || "No playlists found.";
     } catch (err: any) {
       return `Playlist search failed: ${err?.message}`;
     }
   }
 
-  if (payload.toolName === "spotify_play") {
+  if (toolName === "spotify_play") {
     try {
-      const uri: string = payload.args?.uri || "";
+      let uri = args.uri as string | undefined;
+      // Council invocation: find a matching playlist from context and auto-play it
+      if (!uri && council) {
+        const mood = extractMoodFromContext(context) || "ambient";
+        const playlists = await spotify.searchPlaylists(mood);
+        if (playlists.length === 0) {
+          return `[Searched playlists for "${mood}" but found none — playback unchanged]`;
+        }
+        uri = playlists[0].uri;
+        await spotify.play({ contextUri: uri });
+        pushStateAfterCommand();
+        return `[Matched scene mood "${mood}" → now playing playlist "${playlists[0].name}" by ${playlists[0].owner}]`;
+      }
+      if (!uri) return "No URI provided.";
       if (uri.startsWith("spotify:track:")) {
         await spotify.play({ trackUri: uri });
       } else if (uri.startsWith("spotify:playlist:") || uri.startsWith("spotify:album:")) {
@@ -617,10 +722,13 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
     }
   }
 
-  if (payload.toolName === "spotify_playlist_tracks") {
+  if (toolName === "spotify_playlist_tracks") {
     try {
-      const uri: string = payload.args?.playlist_uri || "";
-      const id = uri.startsWith("spotify:playlist:") ? uri.split(":")[2] : uri;
+      const uri = args.playlist_uri as string | undefined;
+      if (!uri && council) {
+        return "Cannot preview playlist tracks without a playlist URI.";
+      }
+      const id = (uri || "").startsWith("spotify:playlist:") ? (uri || "").split(":")[2] : (uri || "");
       const tracks = await spotify.getPlaylistTracks(id);
       const formatted = tracks
         .map((t, i) => `${i + 1}. "${t.name}" by ${t.artist} (${t.album}) — ${t.uri}`)
@@ -631,12 +739,28 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
     }
   }
 
-  if (payload.toolName === "spotify_recommend") {
+  if (toolName === "spotify_recommend") {
     try {
-      const mode: string = payload.args?.mode || "";
+      let mode = args.mode as string | undefined;
+      // Council invocation: default to tag-based recommendations from scene mood
+      if (!mode && council) {
+        const mood = extractMoodFromContext(context) || "ambient";
+        try {
+          const results = await spotify.getTopTracksByTag(mood);
+          const formatted = results
+            .map((r, i) => `${i + 1}. "${r.name}" by ${r.artist}`)
+            .join("\n");
+          return `[Recommendations for scene mood "${mood}"]\n${formatted || "No tracks found for that mood."}`;
+        } catch (err: any) {
+          if (err?.message?.includes("Last.fm API key not configured")) {
+            return "Last.fm API key is not configured. Please ask the user to add their Last.fm API key in the Spotify Controls settings.";
+          }
+          return `Recommendation failed: ${err?.message}`;
+        }
+      }
       if (mode === "similar_tracks") {
-        const track = payload.args?.track;
-        const artist = payload.args?.artist;
+        const track = args.track as string | undefined;
+        const artist = args.artist as string | undefined;
         if (!track || !artist) return "Both 'track' and 'artist' parameters are required for similar_tracks mode.";
         const results = await spotify.getSimilarTracks(track, artist);
         const formatted = results
@@ -644,12 +768,12 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
           .join("\n");
         return formatted || "No similar tracks found.";
       } else if (mode === "similar_artists") {
-        const artist = payload.args?.artist;
+        const artist = args.artist as string | undefined;
         if (!artist) return "The 'artist' parameter is required for similar_artists mode.";
         const results = await spotify.getSimilarArtists(artist);
         return results.length > 0 ? `Similar artists: ${results.join(", ")}` : "No similar artists found.";
       } else if (mode === "tag_top_tracks") {
-        const tag = payload.args?.tag;
+        const tag = args.tag as string | undefined;
         if (!tag) return "The 'tag' parameter is required for tag_top_tracks mode.";
         const results = await spotify.getTopTracksByTag(tag);
         const formatted = results

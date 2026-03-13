@@ -169,6 +169,9 @@ export function setup(ctx: SpindleFrontendContext) {
 
   function applyWidgetStyle() {
     const radius = currentArtShape === "circle" ? "50%" : "22%";
+    // Ensure both the framework container and inner content match the target size
+    widget.root.style.width = `${currentWidgetSize}px`;
+    widget.root.style.height = `${currentWidgetSize}px`;
     widgetContent.style.width = `${currentWidgetSize}px`;
     widgetContent.style.height = `${currentWidgetSize}px`;
     widgetContent.style.borderRadius = radius;
@@ -446,16 +449,21 @@ export function setup(ctx: SpindleFrontendContext) {
 
       case "widget_prefs": {
         const p = msg.prefs;
-        if (p && (p.size !== currentWidgetSize || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode)) {
-          currentArtShape = p.shape;
-          currentSizeMode = p.sizeMode;
+        if (!p) break;
+        const sizeChanged = p.size !== currentWidgetSize;
+        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode;
+        currentArtShape = p.shape;
+        currentSizeMode = p.sizeMode;
+        if (anyChanged) {
           localStorage.setItem(PREFS_KEY, JSON.stringify(p));
-          if (p.size !== currentWidgetSize) {
-            // Defer to avoid destroying/creating a widget while React is mid-render
-            requestAnimationFrame(() => recreateWidget(p.size));
-          } else {
-            applyWidgetStyle();
-          }
+        }
+        if (sizeChanged) {
+          // Defer to avoid destroying/creating a widget while React is mid-render
+          requestAnimationFrame(() => recreateWidget(p.size));
+        } else {
+          // Always re-apply styles so the framework container matches the
+          // expected size even when stored values already agree.
+          applyWidgetStyle();
         }
         break;
       }
