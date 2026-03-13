@@ -677,12 +677,40 @@ function isCouncilInvocation(args: Record<string, unknown> | undefined): boolean
 
 // ─── Tool helpers ────────────────────────────────────────────────────────
 
+/**
+ * Race a promise against a timeout. Rejects with a descriptive error if the
+ * call exceeds `ms`. The label is included in logs and error messages so we
+ * can pinpoint exactly which API call stalled.
+ */
+function timed<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label}: timed out after ${ms}ms`)),
+      ms,
+    );
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(new Error(`${label}: ${err?.message || err}`)); },
+    );
+  });
+}
+
+/** Convenience: run a timed call and fall back to `fallback` on any error,
+ *  logging the failure so it surfaces in the Spindle console. */
+function timedSafe<T>(promise: Promise<T>, ms: number, label: string, fallback: T): Promise<T> {
+  return timed(promise, ms, label).catch((err: Error) => {
+    spindle.log.warn(err.message);
+    return fallback;
+  });
+}
+
 /** Resolve a Last.fm track recommendation to a Spotify search result. */
 async function resolveOnSpotify(trackName: string, artist: string): Promise<SearchResult | null> {
   try {
     const results = await spotify.search(`${trackName} ${artist}`);
     return results.length > 0 ? results[0] : null;
-  } catch {
+  } catch (err: any) {
+    spindle.log.warn(`resolveOnSpotify("${trackName}", "${artist}"): ${err?.message}`);
     return null;
   }
 }
@@ -814,6 +842,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
 
   // ── spotify_mood_discover: mood-matched but varied discovery ────────
   if (toolName === "spotify_mood_discover") {
+    const CALL_TIMEOUT = 4000; // Per-call timeout for CORS-proxied requests
     try {
       // Use cached state to avoid an extra API call
       const state = lastState;
@@ -821,13 +850,14 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         return "Nothing is currently playing. Play something first so we can discover mood-matching music.";
       }
 
+      spindle.log.info(`[mood_discover] Starting for "${state.trackName}" by ${state.artistName}`);
+
       // ── Resolve mood tags ────────────────────────────────────────
       // Priority: explicit mood arg > context extraction > track tags > artist tags
       let moodTags: string[] = [];
       const moodArg = args.mood as string | undefined;
 
       if (moodArg) {
-        // LLM provided explicit mood descriptors — map each to Last.fm tags
         const terms = moodArg.split(/[,\s]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
         for (const term of terms) {
           const mapped = MOOD_TO_LASTFM_TAGS[term];
@@ -838,9 +868,9 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
           }
         }
         moodTags = [...new Set(moodTags)];
+        spindle.log.info(`[mood_discover] Mood from arg "${moodArg}" → tags: [${moodTags.join(", ")}]`);
       }
 
-      // Fallback: extract from scene context, then from track/artist tags
       if (moodTags.length === 0 && context) {
         const moodStr = extractMoodFromContext(context);
         if (moodStr) {
@@ -849,22 +879,26 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
             if (mapped) moodTags.push(...mapped);
           }
           moodTags = [...new Set(moodTags)];
+          spindle.log.info(`[mood_discover] Mood from context → "${moodStr}" → tags: [${moodTags.join(", ")}]`);
         }
       }
 
       // ── Batch 1: Fetch Last.fm data in parallel ────────────────
-      // Always fetch similar artists (for the variety blocklist).
-      // Fetch track/artist tags only if we still need mood signals.
       const needTagFallback = moodTags.length === 0;
       const [trackTags, artistTags, similarArtists] = await Promise.all([
-        needTagFallback ? spotify.getTrackTopTags(state.trackName, state.artistName).catch(() => []) : Promise.resolve([]),
-        needTagFallback ? spotify.getArtistTopTags(state.artistName).catch(() => []) : Promise.resolve([]),
-        spotify.getSimilarArtists(state.artistName, 5).catch(() => []),
+        needTagFallback
+          ? timedSafe(spotify.getTrackTopTags(state.trackName, state.artistName), CALL_TIMEOUT, "track.getTopTags", [])
+          : Promise.resolve([]),
+        needTagFallback
+          ? timedSafe(spotify.getArtistTopTags(state.artistName), CALL_TIMEOUT, "artist.getTopTags", [])
+          : Promise.resolve([]),
+        timedSafe(spotify.getSimilarArtists(state.artistName, 5), CALL_TIMEOUT, "artist.getSimilar", []),
       ]);
 
       if (needTagFallback) {
         moodTags = extractMoodTags(trackTags);
         if (moodTags.length === 0) moodTags = extractMoodTags(artistTags, 0);
+        spindle.log.info(`[mood_discover] Mood from tags fallback → [${moodTags.join(", ")}]`);
       }
 
       if (moodTags.length === 0) {
@@ -874,8 +908,11 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       // ── Batch 2: Query tag.getTopTracks for top 2 mood tags ───────
       const queryTags = moodTags.slice(0, 2);
       const page = Math.floor(Math.random() * 3) + 1;
+      spindle.log.info(`[mood_discover] Querying tag.getTopTracks for [${queryTags.join(", ")}] page=${page}`);
       const tagResults = await Promise.all(
-        queryTags.map(tag => spotify.getTopTracksByTag(tag, 20, page).catch(() => []))
+        queryTags.map(tag =>
+          timedSafe(spotify.getTopTracksByTag(tag, 20, page), CALL_TIMEOUT, `tag.getTopTracks("${tag}")`, [])
+        )
       );
 
       // ── Build candidate pool — score, filter, diversify (CPU only) ─
@@ -930,39 +967,50 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       candidates = shuffled.slice(0, 5);
 
       if (candidates.length === 0) {
-        return `Found mood tags [${queryTags.join(", ")}] but no diverse matches after filtering similar artists. Try playing a different track.`;
+        const totalResults = tagResults.reduce((n, r) => n + r.length, 0);
+        return `Found mood tags [${queryTags.join(", ")}] with ${totalResults} raw results, but 0 remained after filtering ${blockedArtists.size} blocked artists. Try playing a different track.`;
       }
 
-      // ── Batch 3: Resolve on Spotify + play in one burst ───────────
+      spindle.log.info(`[mood_discover] Resolving ${candidates.length} candidates on Spotify`);
+
+      // ── Batch 3: Resolve on Spotify + play ─────────────────────
       const resolved = (await Promise.all(
-        candidates.map(c => resolveOnSpotify(c.name, c.artist))
+        candidates.map(c =>
+          timed(resolveOnSpotify(c.name, c.artist), CALL_TIMEOUT, `spotify.search("${c.name}")`)
+            .catch((err: Error) => { spindle.log.warn(err.message); return null; })
+        )
       )).filter((r): r is SearchResult => r !== null);
 
       if (resolved.length === 0) return "Found mood-matching tracks via Last.fm but could not match any on Spotify.";
 
-      // Play first track; queue rest in parallel with the state push
-      await spotify.play({ trackUri: resolved[0].uri });
+      await timed(spotify.play({ trackUri: resolved[0].uri }), CALL_TIMEOUT, "spotify.play");
       pushStateAfterCommand();
 
+      // Queue remaining — fire-and-forget, don't let queue failures delay the response
       const toQueue = resolved.slice(1);
       const queued: string[] = [];
-      await Promise.all(
-        toQueue.map(async (track) => {
-          try {
-            await spotify.addToQueue(track.uri);
-            queued.push(`"${track.name}" by ${track.artist}`);
-          } catch {}
-        })
-      );
+      if (toQueue.length > 0) {
+        await Promise.all(
+          toQueue.map(async (track) => {
+            try {
+              await timed(spotify.addToQueue(track.uri), CALL_TIMEOUT, `spotify.queue("${track.name}")`);
+              queued.push(`"${track.name}" by ${track.artist}`);
+            } catch (err: any) {
+              spindle.log.warn(`Queue failed for "${track.name}": ${err?.message}`);
+            }
+          })
+        );
+      }
 
       const moodDesc = queryTags.join(", ");
       const queueLine = queued.length > 0
         ? `\n\nQueued ${queued.length} varied tracks:\n${queued.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
         : "";
-      // Show prefix for council invocations (mood arg implies council context too)
       const prefix = (council || (moodArg && context)) ? `[Mood discovery: ${moodDesc}] ` : "";
+      spindle.log.info(`[mood_discover] Done — playing "${resolved[0].name}", ${queued.length} queued`);
       return `${prefix}Now playing "${resolved[0].name}" by ${resolved[0].artist} (mood: ${moodDesc}, varied from "${state.trackName}")${queueLine}`;
     } catch (err: any) {
+      spindle.log.error(`[mood_discover] ${err?.message}`);
       if (err?.message?.includes("Last.fm API key not configured")) {
         return "Last.fm API key is not configured. Please add it in the Spotify Controls settings.";
       }
