@@ -139,7 +139,7 @@ export async function getCurrentPlayback(): Promise<PlaybackState | null> {
   const data = JSON.parse(res.body);
   if (!data.item) return null;
 
-  const images = data.item.album?.images || [];
+  const images = data.item.album?.images ?? [];
   return {
     isPlaying: data.is_playing,
     trackName: data.item.name,
@@ -214,17 +214,19 @@ export async function search(query: string): Promise<SearchResult[]> {
   if (res.status !== 200) return [];
 
   const data = JSON.parse(res.body);
-  return (data.tracks?.items || []).map((track: any) => {
-    const images = track.album?.images || [];
-    return {
-      name: track.name,
-      artist: (track.artists || []).map((a: any) => a.name).join(", "),
-      album: track.album?.name || "",
-      albumArtUrl: images.length > 0 ? images[images.length > 1 ? 1 : 0].url : null,
-      uri: track.uri,
-      durationMs: track.duration_ms || 0,
-    };
-  });
+  return (data.tracks?.items || [])
+    .filter((track: any) => track != null)
+    .map((track: any) => {
+      const images = track.album?.images ?? [];
+      return {
+        name: track.name ?? "",
+        artist: (track.artists || []).map((a: any) => a.name).join(", "),
+        album: track.album?.name || "",
+        albumArtUrl: images.length > 0 ? images[images.length > 1 ? 1 : 0].url : null,
+        uri: track.uri ?? "",
+        durationMs: track.duration_ms || 0,
+      };
+    });
 }
 
 export async function addToQueue(uri: string): Promise<void> {
@@ -341,17 +343,19 @@ export async function searchPlaylists(query: string, limit = 15): Promise<Playli
   if (res.status !== 200) return [];
 
   const data = JSON.parse(res.body);
-  return (data.playlists?.items || []).map((p: any) => {
-    const images = p.images || [];
-    return {
-      name: p.name,
-      owner: p.owner?.display_name || "Unknown",
-      trackCount: p.tracks?.total || 0,
-      uri: p.uri,
-      spotifyUrl: p.external_urls?.spotify || "",
-      imageUrl: images.length > 0 ? images[0].url : null,
-    };
-  });
+  return (data.playlists?.items || [])
+    .filter((p: any) => p != null)
+    .map((p: any) => {
+      const images = p.images ?? [];
+      return {
+        name: p.name ?? "",
+        owner: p.owner?.display_name || "Unknown",
+        trackCount: p.tracks?.total || 0,
+        uri: p.uri ?? "",
+        spotifyUrl: p.external_urls?.spotify || "",
+        imageUrl: images.length > 0 ? images[0].url : null,
+      };
+    });
 }
 
 // ─── Playlist Tracks ──────────────────────────────────────────────────
@@ -364,16 +368,16 @@ export async function getPlaylistTracks(playlistId: string, limit = 20): Promise
 
   const data = JSON.parse(res.body);
   return (data.items || [])
-    .filter((item: any) => item.track)
+    .filter((item: any) => item != null && item.track)
     .map((item: any) => {
       const track = item.track;
-      const images = track.album?.images || [];
+      const images = track.album?.images ?? [];
       return {
-        name: track.name,
+        name: track.name ?? "",
         artist: (track.artists || []).map((a: any) => a.name).join(", "),
         album: track.album?.name || "",
         albumArtUrl: images.length > 0 ? images[images.length > 1 ? 1 : 0].url : null,
-        uri: track.uri,
+        uri: track.uri ?? "",
         durationMs: track.duration_ms || 0,
       };
     });
