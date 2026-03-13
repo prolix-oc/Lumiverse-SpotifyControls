@@ -1,6 +1,6 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
-import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs } from "./types";
+import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult } from "./types";
 import * as spotify from "./spotify-api";
 
 // ─── State ───────────────────────────────────────────────────────────────
@@ -482,25 +482,46 @@ spindle.registerMacro({
 // Unregister first so hot-reloads / re-evaluations don't create duplicates
 const TOOL_NAMES = [
   "spotify_search",
+  "spotify_search_similar",
   "spotify_queue",
+] as const;
+for (const name of TOOL_NAMES) spindle.unregisterTool(name);
+
+// Clean up deprecated tools from previous versions
+const DEPRECATED_TOOL_NAMES = [
   "spotify_find_playlist",
   "spotify_play",
   "spotify_playlist_tracks",
   "spotify_recommend",
-] as const;
-for (const name of TOOL_NAMES) spindle.unregisterTool(name);
+];
+for (const name of DEPRECATED_TOOL_NAMES) spindle.unregisterTool(name);
 
 spindle.registerTool({
   name: "spotify_search",
-  display_name: "Spotify Search",
-  description: "Search for tracks on Spotify. Returns track names, artists, albums, and URIs.",
+  display_name: "Spotify Search & Play",
+  description: "Search for music on Spotify and start playback. Supports two modes: 'playlist' searches for curated playlists matching a mood or query and plays the best match; 'tracks' searches for individual songs and plays the top result. Handles the full pipeline — search, resolve, and play — in one step.",
   council_eligible: true,
   parameters: {
     type: "object",
     properties: {
-      query: { type: "string", description: "Search query for tracks" },
+      query: { type: "string", description: "Search query — a song/artist name, or mood/atmosphere descriptors like 'dark ambient mysterious', 'upbeat jazz cafe', 'epic orchestral battle'" },
+      mode: { type: "string", enum: ["tracks", "playlist"], description: "Search mode: 'playlist' finds curated playlists (best for mood/atmosphere), 'tracks' finds individual songs (best for specific songs). Defaults to 'playlist'." },
     },
     required: ["query"],
+  },
+});
+
+spindle.registerTool({
+  name: "spotify_search_similar",
+  display_name: "Find & Play Similar Music",
+  description: "Find music similar to what is currently playing and start playback. Uses the current track to query Last.fm for similar songs, optionally filtered by mood/genre tags. Resolves the best match on Spotify and plays it, queuing additional similar tracks. Requires Last.fm API key.",
+  council_eligible: true,
+  parameters: {
+    type: "object",
+    properties: {
+      mood: { type: "string", description: "Optional mood/genre tags to influence discovery (e.g. 'dark ambient', 'synthwave', 'chill electronic'). Combined with the currently playing track for better results." },
+    },
+    required: [],
   },
 });
 
@@ -518,65 +539,6 @@ spindle.registerTool({
       },
     },
     required: ["uri"],
-  },
-});
-
-spindle.registerTool({
-  name: "spotify_find_playlist",
-  display_name: "Find Spotify Playlist",
-  description: "Search for Spotify playlists using 3-4 words describing the atmosphere, mood, or tone of a scene. Returns matching playlists that can be played with spotify_play.",
-  council_eligible: true,
-  parameters: {
-    type: "object",
-    properties: {
-      query: { type: "string", description: "3-4 words describing the scene's atmosphere and tone (e.g. 'dark ambient mysterious', 'upbeat jazz cafe', 'epic orchestral battle')" },
-    },
-    required: ["query"],
-  },
-});
-
-spindle.registerTool({
-  name: "spotify_play",
-  display_name: "Spotify Play",
-  description: "Start playback of a Spotify track, playlist, or album by URI.",
-  council_eligible: true,
-  parameters: {
-    type: "object",
-    properties: {
-      uri: { type: "string", description: "Spotify URI (spotify:track:..., spotify:playlist:..., or spotify:album:...)" },
-    },
-    required: ["uri"],
-  },
-});
-
-spindle.registerTool({
-  name: "spotify_playlist_tracks",
-  display_name: "Spotify Playlist Tracks",
-  description: "Preview the tracks in a Spotify playlist before playing it.",
-  council_eligible: true,
-  parameters: {
-    type: "object",
-    properties: {
-      playlist_uri: { type: "string", description: "Spotify playlist URI" },
-    },
-    required: ["playlist_uri"],
-  },
-});
-
-spindle.registerTool({
-  name: "spotify_recommend",
-  display_name: "Music Recommendations",
-  description: "Get music recommendations via Last.fm. Modes: 'similar_tracks' (find tracks like a given one), 'similar_artists' (find artists like a given one), 'tag_top_tracks' (top tracks for a genre/mood tag like 'dark ambient', 'synthwave', 'chill').",
-  council_eligible: true,
-  parameters: {
-    type: "object",
-    properties: {
-      mode: { type: "string", enum: ["similar_tracks", "similar_artists", "tag_top_tracks"], description: "Recommendation mode" },
-      track: { type: "string", description: "Track name (for similar_tracks mode)" },
-      artist: { type: "string", description: "Artist name (for similar_tracks or similar_artists mode)" },
-      tag: { type: "string", description: "Genre/mood tag (for tag_top_tracks mode)" },
-    },
-    required: ["mode"],
   },
 });
 
@@ -635,6 +597,18 @@ function isCouncilInvocation(args: Record<string, unknown> | undefined): boolean
   return keys.length === 1 && keys[0] === "context";
 }
 
+// ─── Tool helpers ────────────────────────────────────────────────────────
+
+/** Resolve a Last.fm track recommendation to a Spotify search result. */
+async function resolveOnSpotify(trackName: string, artist: string): Promise<SearchResult | null> {
+  try {
+    const results = await spotify.search(`${trackName} ${artist}`);
+    return results.length > 0 ? results[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Tool invocation handler ────────────────────────────────────────────
 
 // Handle tool invocations via events
@@ -650,155 +624,171 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   const council = isCouncilInvocation(args);
   const context: string = (args.context as string) || "";
 
+  // ── spotify_search: search + play pipeline ──────────────────────────
   if (toolName === "spotify_search") {
     try {
       let query = args.query as string | undefined;
-      if (!query && council) {
-        query = extractMoodFromContext(context) + " soundtrack";
-        if (query.trim() === "soundtrack") query = "ambient soundtrack";
-      }
-      const results = await spotify.search(query || "");
-      const formatted = results
-        .map((r, i) => `${i + 1}. "${r.name}" by ${r.artist} (${r.album}) — ${r.uri}`)
-        .join("\n");
+      let mode = args.mode as string | undefined;
+
+      // Council invocation: extract mood from context, default to playlist mode
       if (council) {
-        return `[Searched Spotify for "${query}"]\n${formatted || "No results found."}`;
+        query = extractMoodFromContext(context) || "ambient";
+        mode = "playlist";
       }
-      return formatted || "No results found.";
+
+      if (!query) return "No search query provided.";
+      if (!mode) mode = "playlist";
+
+      if (mode === "playlist") {
+        const playlists = await spotify.searchPlaylists(query);
+        if (playlists.length > 0) {
+          const best = playlists[0];
+          await spotify.play({ contextUri: best.uri });
+          pushStateAfterCommand();
+          const others = playlists.slice(1, 5)
+            .map((p, i) => `${i + 2}. "${p.name}" by ${p.owner} (${p.trackCount} tracks)`)
+            .join("\n");
+          const prefix = council ? `[Matched mood "${query}"] ` : "";
+          return `${prefix}Now playing playlist "${best.name}" by ${best.owner} (${best.trackCount} tracks)${others ? `\n\nOther matches:\n${others}` : ""}`;
+        }
+        // Playlist search found nothing — fall through to track search
+      }
+
+      // Tracks mode (or playlist fallback)
+      const results = await spotify.search(query);
+      if (results.length === 0) return `No results found for "${query}".`;
+
+      const best = results[0];
+      await spotify.play({ trackUri: best.uri });
+      pushStateAfterCommand();
+      const others = results.slice(1, 5)
+        .map((r, i) => `${i + 2}. "${r.name}" by ${r.artist} (${r.album})`)
+        .join("\n");
+      const prefix = council ? `[Searched for "${query}"] ` : "";
+      return `${prefix}Now playing "${best.name}" by ${best.artist} (${best.album})${others ? `\n\nOther matches:\n${others}` : ""}`;
     } catch (err: any) {
-      return `Search failed: ${err?.message}`;
+      return `Search & play failed: ${err?.message}`;
     }
   }
 
+  // ── spotify_search_similar: similar music discovery + play ───────────
+  if (toolName === "spotify_search_similar") {
+    try {
+      let mood = args.mood as string | undefined;
+
+      // Council invocation: extract mood from context
+      if (council) {
+        mood = extractMoodFromContext(context) || undefined;
+      }
+
+      // Get the currently playing track
+      const state = lastState || await spotify.getCurrentPlayback();
+      const hasCurrentTrack = state?.trackName && state?.artistName;
+
+      if (!hasCurrentTrack && !mood) {
+        return "Nothing is currently playing and no mood provided. Play something first or provide a mood.";
+      }
+
+      // Gather candidates from Last.fm in parallel
+      const candidates: { name: string; artist: string }[] = [];
+      const sources: string[] = [];
+
+      const promises: Promise<void>[] = [];
+
+      // Similar tracks from Last.fm (based on current song)
+      if (hasCurrentTrack) {
+        promises.push(
+          spotify.getSimilarTracks(state!.trackName, state!.artistName)
+            .then((tracks) => {
+              candidates.push(...tracks);
+              if (tracks.length > 0) sources.push(`similar to "${state!.trackName}" by ${state!.artistName}`);
+            })
+            .catch(() => { /* Last.fm unavailable — continue with other sources */ })
+        );
+      }
+
+      // Tag-based tracks from Last.fm (based on mood)
+      if (mood) {
+        promises.push(
+          spotify.getTopTracksByTag(mood)
+            .then((tracks) => {
+              candidates.push(...tracks);
+              if (tracks.length > 0) sources.push(`mood "${mood}"`);
+            })
+            .catch(() => { /* Last.fm unavailable — continue with other sources */ })
+        );
+      }
+
+      await Promise.all(promises);
+
+      // Deduplicate by name+artist (case-insensitive)
+      const seen = new Set<string>();
+      const unique = candidates.filter((c) => {
+        const key = `${c.name.toLowerCase()}::${c.artist.toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      if (unique.length === 0) {
+        // Fallback: search Spotify directly with combined terms
+        const fallbackQuery = [
+          hasCurrentTrack ? state!.artistName : "",
+          mood || "",
+        ].filter(Boolean).join(" ");
+        const results = await spotify.search(fallbackQuery);
+        if (results.length === 0) return "Could not find similar music.";
+        await spotify.play({ trackUri: results[0].uri });
+        pushStateAfterCommand();
+        return `Now playing "${results[0].name}" by ${results[0].artist} (Spotify search fallback for "${fallbackQuery}")`;
+      }
+
+      // Resolve top candidates on Spotify (limit to 8 to avoid excessive API calls)
+      const toResolve = unique.slice(0, 8);
+      const resolved = (await Promise.all(
+        toResolve.map((c) => resolveOnSpotify(c.name, c.artist))
+      )).filter((r): r is SearchResult => r !== null);
+
+      if (resolved.length === 0) return "Found similar tracks via Last.fm but could not match any on Spotify.";
+
+      // Play the first track
+      await spotify.play({ trackUri: resolved[0].uri });
+      pushStateAfterCommand();
+
+      // Queue the rest
+      const queued: string[] = [];
+      for (const track of resolved.slice(1)) {
+        try {
+          await spotify.addToQueue(track.uri);
+          queued.push(`"${track.name}" by ${track.artist}`);
+        } catch {
+          // Skip tracks that fail to queue
+        }
+      }
+
+      const sourceLine = sources.length > 0 ? `\nSources: ${sources.join(", ")}` : "";
+      const queueLine = queued.length > 0 ? `\n\nQueued ${queued.length} similar tracks:\n${queued.map((q, i) => `${i + 1}. ${q}`).join("\n")}` : "";
+      const prefix = council ? `[Similar music] ` : "";
+      return `${prefix}Now playing "${resolved[0].name}" by ${resolved[0].artist}${sourceLine}${queueLine}`;
+    } catch (err: any) {
+      if (err?.message?.includes("Last.fm API key not configured")) {
+        return "Last.fm API key is not configured. Please add it in the Spotify Controls settings.";
+      }
+      return `Similar search failed: ${err?.message}`;
+    }
+  }
+
+  // ── spotify_queue: add to queue (unchanged) ─────────────────────────
   if (toolName === "spotify_queue") {
     try {
       const uri = args.uri as string | undefined;
       if (!uri && council) {
-        return "Cannot queue a track without a URI. Use spotify_find_playlist or spotify_search first to discover tracks.";
+        return "Cannot queue a track without a URI. Use spotify_search to discover tracks first.";
       }
       await spotify.addToQueue(uri || "");
       return "Track added to queue.";
     } catch (err: any) {
       return `Failed to queue track: ${err?.message}`;
-    }
-  }
-
-  if (toolName === "spotify_find_playlist") {
-    try {
-      let query = args.query as string | undefined;
-      if (!query && council) {
-        query = extractMoodFromContext(context);
-        if (!query) query = "ambient";
-      }
-      const results = await spotify.searchPlaylists(query || "");
-      const formatted = results
-        .map((r, i) => `${i + 1}. "${r.name}" by ${r.owner} (${r.trackCount} tracks) — ${r.uri}`)
-        .join("\n");
-      if (council) {
-        return `[Searched playlists for "${query}"]\n${formatted || "No playlists found."}`;
-      }
-      return formatted || "No playlists found.";
-    } catch (err: any) {
-      return `Playlist search failed: ${err?.message}`;
-    }
-  }
-
-  if (toolName === "spotify_play") {
-    try {
-      let uri = args.uri as string | undefined;
-      // Council invocation: find a matching playlist from context and auto-play it
-      if (!uri && council) {
-        const mood = extractMoodFromContext(context) || "ambient";
-        const playlists = await spotify.searchPlaylists(mood);
-        if (playlists.length === 0) {
-          return `[Searched playlists for "${mood}" but found none — playback unchanged]`;
-        }
-        uri = playlists[0].uri;
-        await spotify.play({ contextUri: uri });
-        pushStateAfterCommand();
-        return `[Matched scene mood "${mood}" → now playing playlist "${playlists[0].name}" by ${playlists[0].owner}]`;
-      }
-      if (!uri) return "No URI provided.";
-      if (uri.startsWith("spotify:track:")) {
-        await spotify.play({ trackUri: uri });
-      } else if (uri.startsWith("spotify:playlist:") || uri.startsWith("spotify:album:")) {
-        await spotify.play({ contextUri: uri });
-      } else {
-        return `Invalid URI format: ${uri}`;
-      }
-      pushStateAfterCommand();
-      return `Now playing: ${uri}`;
-    } catch (err: any) {
-      return `Playback failed: ${err?.message}`;
-    }
-  }
-
-  if (toolName === "spotify_playlist_tracks") {
-    try {
-      const uri = args.playlist_uri as string | undefined;
-      if (!uri && council) {
-        return "Cannot preview playlist tracks without a playlist URI.";
-      }
-      const id = (uri || "").startsWith("spotify:playlist:") ? (uri || "").split(":")[2] : (uri || "");
-      const tracks = await spotify.getPlaylistTracks(id);
-      const formatted = tracks
-        .map((t, i) => `${i + 1}. "${t.name}" by ${t.artist} (${t.album}) — ${t.uri}`)
-        .join("\n");
-      return formatted || "No tracks found in playlist.";
-    } catch (err: any) {
-      return `Failed to get playlist tracks: ${err?.message}`;
-    }
-  }
-
-  if (toolName === "spotify_recommend") {
-    try {
-      let mode = args.mode as string | undefined;
-      // Council invocation: default to tag-based recommendations from scene mood
-      if (!mode && council) {
-        const mood = extractMoodFromContext(context) || "ambient";
-        try {
-          const results = await spotify.getTopTracksByTag(mood);
-          const formatted = results
-            .map((r, i) => `${i + 1}. "${r.name}" by ${r.artist}`)
-            .join("\n");
-          return `[Recommendations for scene mood "${mood}"]\n${formatted || "No tracks found for that mood."}`;
-        } catch (err: any) {
-          if (err?.message?.includes("Last.fm API key not configured")) {
-            return "Last.fm API key is not configured. Please ask the user to add their Last.fm API key in the Spotify Controls settings.";
-          }
-          return `Recommendation failed: ${err?.message}`;
-        }
-      }
-      if (mode === "similar_tracks") {
-        const track = args.track as string | undefined;
-        const artist = args.artist as string | undefined;
-        if (!track || !artist) return "Both 'track' and 'artist' parameters are required for similar_tracks mode.";
-        const results = await spotify.getSimilarTracks(track, artist);
-        const formatted = results
-          .map((r, i) => `${i + 1}. "${r.name}" by ${r.artist}`)
-          .join("\n");
-        return formatted || "No similar tracks found.";
-      } else if (mode === "similar_artists") {
-        const artist = args.artist as string | undefined;
-        if (!artist) return "The 'artist' parameter is required for similar_artists mode.";
-        const results = await spotify.getSimilarArtists(artist);
-        return results.length > 0 ? `Similar artists: ${results.join(", ")}` : "No similar artists found.";
-      } else if (mode === "tag_top_tracks") {
-        const tag = args.tag as string | undefined;
-        if (!tag) return "The 'tag' parameter is required for tag_top_tracks mode.";
-        const results = await spotify.getTopTracksByTag(tag);
-        const formatted = results
-          .map((r, i) => `${i + 1}. "${r.name}" by ${r.artist}`)
-          .join("\n");
-        return formatted || "No tracks found for that tag.";
-      } else {
-        return `Unknown mode: ${mode}. Use 'similar_tracks', 'similar_artists', or 'tag_top_tracks'.`;
-      }
-    } catch (err: any) {
-      if (err?.message?.includes("Last.fm API key not configured")) {
-        return "Last.fm API key is not configured. Please ask the user to add their Last.fm API key in the Spotify Controls settings.";
-      }
-      return `Recommendation failed: ${err?.message}`;
     }
   }
 });
