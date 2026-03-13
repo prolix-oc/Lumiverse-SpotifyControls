@@ -483,6 +483,7 @@ spindle.registerMacro({
 const TOOL_NAMES = [
   "spotify_search",
   "spotify_search_similar",
+  "spotify_mood_discover",
   "spotify_queue",
 ] as const;
 for (const name of TOOL_NAMES) spindle.unregisterTool(name);
@@ -515,6 +516,18 @@ spindle.registerTool({
   name: "spotify_search_similar",
   display_name: "Find & Play Similar Music",
   description: "Find music similar to what is currently playing and start playback. Uses Last.fm's track similarity data (based on listening patterns, not genre tags) to find genuinely related tracks, then resolves and plays them on Spotify. Queues additional similar tracks automatically. Requires a track to be currently playing and a Last.fm API key.",
+  council_eligible: true,
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+});
+
+spindle.registerTool({
+  name: "spotify_mood_discover",
+  display_name: "Mood-Based Music Discovery",
+  description: "Discover music matching the current mood/atmosphere but with deliberate variety — finds tracks that share the emotional tone of what's playing (or the scene's tone) but from different artists and genres. Uses Last.fm's crowd-sourced mood tags to find diverse, mood-matching tracks rather than 'more of the same'. Requires a track to be currently playing and a Last.fm API key.",
   council_eligible: true,
   parameters: {
     type: "object",
@@ -557,6 +570,51 @@ const MOOD_KEYWORDS: Record<string, string[]> = {
   intense:     ["intense", "fierce", "rage", "fury", "storm", "roar", "crash", "fire", "burn", "blaze"],
   ethereal:    ["dream", "ethereal", "celestial", "spirit", "ghost", "divine", "heavenly", "astral", "mystic", "void"],
 };
+
+/** Known mood/atmosphere tags on Last.fm. Used to separate mood tags from genre
+ *  tags when processing track.getTopTags results. */
+const MOOD_TAG_SET = new Set([
+  // Emotional
+  "happy", "sad", "melancholy", "melancholic", "angry", "aggressive",
+  "romantic", "love", "nostalgic", "bittersweet", "hopeful", "euphoric",
+  "joyful", "cheerful", "depressing", "gloomy", "uplifting", "triumphant",
+  "passionate", "sentimental", "wistful", "longing", "heartbreak", "heartfelt",
+  "blissful", "tender", "gentle", "fierce", "furious", "anxious",
+  // Atmospheric
+  "atmospheric", "dreamy", "ethereal", "haunting", "dark", "eerie",
+  "hypnotic", "psychedelic", "cinematic", "epic", "majestic",
+  "sinister", "ominous", "mysterious", "brooding", "moody", "sultry",
+  "whimsical", "playful", "surreal", "otherworldly",
+  // Energy
+  "chill", "chillout", "relaxing", "calm", "peaceful", "serene",
+  "soothing", "mellow", "laid-back", "upbeat", "energetic", "intense",
+  "driving", "groovy", "fun", "party",
+  // Scene
+  "night", "summer", "rainy", "morning", "sensual", "introspective",
+  "contemplative", "spiritual", "meditative", "nocturnal",
+]);
+
+/** Maps extracted mood categories (from MOOD_KEYWORDS) to concrete Last.fm
+ *  tag strings suitable for tag.getTopTracks queries. */
+const MOOD_TO_LASTFM_TAGS: Record<string, string[]> = {
+  dark:        ["dark", "brooding", "haunting", "ominous", "sinister", "nocturnal"],
+  tense:       ["intense", "aggressive", "anxious", "driving"],
+  sad:         ["sad", "melancholy", "melancholic", "bittersweet", "gloomy"],
+  romantic:    ["romantic", "love", "sensual", "passionate", "tender"],
+  epic:        ["epic", "cinematic", "triumphant", "majestic", "uplifting"],
+  peaceful:    ["chill", "relaxing", "calm", "peaceful", "serene", "mellow"],
+  mysterious:  ["mysterious", "atmospheric", "ethereal", "eerie", "hypnotic"],
+  joyful:      ["happy", "joyful", "cheerful", "upbeat", "fun", "euphoric"],
+  intense:     ["aggressive", "energetic", "intense", "fierce", "furious"],
+  ethereal:    ["dreamy", "ethereal", "atmospheric", "hypnotic", "meditative"],
+};
+
+/** Extract mood-related tags from a track/artist's Last.fm tag list. */
+function extractMoodTags(tags: { name: string; count: number }[], minCount = 5): string[] {
+  return tags
+    .filter(t => t.count >= minCount && MOOD_TAG_SET.has(t.name))
+    .map(t => t.name);
+}
 
 /** Score a context string against mood categories and return the top N mood
  *  descriptors suitable for a Spotify/Last.fm search query. */
@@ -729,6 +787,149 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         return "Last.fm API key is not configured. Please add it in the Spotify Controls settings.";
       }
       return `Similar search failed: ${err?.message}`;
+    }
+  }
+
+  // ── spotify_mood_discover: mood-matched but varied discovery ────────
+  if (toolName === "spotify_mood_discover") {
+    try {
+      const state = lastState || await spotify.getCurrentPlayback();
+      if (!state?.trackName || !state?.artistName) {
+        return "Nothing is currently playing. Play something first so we can discover mood-matching music.";
+      }
+
+      // Step 1: Get mood signals — current track's tags + similar artists (blocklist) in parallel
+      const [trackTags, similarArtists] = await Promise.all([
+        spotify.getTrackTopTags(state.trackName, state.artistName).catch(() => []),
+        spotify.getSimilarArtists(state.artistName, 10).catch(() => []),
+      ]);
+
+      const trackMoodTags = extractMoodTags(trackTags);
+
+      // Step 2: Get mood signals from scene context (council invocations)
+      const contextMoodTags: string[] = [];
+      if (council && context) {
+        const moodStr = extractMoodFromContext(context);
+        if (moodStr) {
+          for (const mood of moodStr.split(" ")) {
+            const mapped = MOOD_TO_LASTFM_TAGS[mood];
+            if (mapped) contextMoodTags.push(...mapped);
+          }
+        }
+      }
+
+      // Step 3: Merge mood tags — context first (scene-driven), then track's own tags
+      let moodTags = [...new Set([...contextMoodTags, ...trackMoodTags])];
+
+      // Fallback: try the artist's tags if the track had no mood tags
+      if (moodTags.length === 0) {
+        const artistTags = await spotify.getArtistTopTags(state.artistName).catch(() => []);
+        moodTags = extractMoodTags(artistTags, 0);
+      }
+
+      if (moodTags.length === 0) {
+        return `Could not determine the mood of "${state.trackName}" by ${state.artistName}. No mood tags found on Last.fm.`;
+      }
+
+      // Step 4: Query tag.getTopTracks for top 3 mood tags
+      // Random page offset (1-3) so repeated invocations yield different results
+      const queryTags = moodTags.slice(0, 3);
+      const page = Math.floor(Math.random() * 3) + 1;
+      const tagResults = await Promise.all(
+        queryTags.map(tag => spotify.getTopTracksByTag(tag, 30, page).catch(() => []))
+      );
+
+      // Step 5: Build candidate pool — score, filter, diversify
+      const blockedArtists = new Set(similarArtists.map(a => a.toLowerCase()));
+      blockedArtists.add(state.artistName.toLowerCase());
+      const currentTrackLower = state.trackName.toLowerCase();
+
+      const candidateMap = new Map<string, { name: string; artist: string; score: number }>();
+      for (const tracks of tagResults) {
+        for (const track of tracks) {
+          const artistLower = track.artist.toLowerCase();
+
+          // Variety filter: skip current track, current artist, and similar artists
+          if (track.name.toLowerCase() === currentTrackLower && artistLower === state.artistName.toLowerCase()) continue;
+          if (blockedArtists.has(artistLower)) continue;
+
+          const key = `${track.name.toLowerCase()}::${artistLower}`;
+          const existing = candidateMap.get(key);
+          if (existing) {
+            existing.score++; // Multi-tag match = stronger mood confidence
+          } else {
+            candidateMap.set(key, { name: track.name, artist: track.artist, score: 1 });
+          }
+        }
+      }
+
+      let candidates = Array.from(candidateMap.values());
+
+      // Max 1 track per artist to prevent clustering
+      const seenArtists = new Set<string>();
+      candidates = candidates.filter(c => {
+        const a = c.artist.toLowerCase();
+        if (seenArtists.has(a)) return false;
+        seenArtists.add(a);
+        return true;
+      });
+
+      // Sort by score then shuffle within each score tier for randomness
+      candidates.sort((a, b) => b.score - a.score);
+      const shuffled: typeof candidates = [];
+      let ci = 0;
+      while (ci < candidates.length) {
+        let cj = ci;
+        while (cj < candidates.length && candidates[cj].score === candidates[ci].score) cj++;
+        const tier = candidates.slice(ci, cj);
+        for (let k = tier.length - 1; k > 0; k--) {
+          const m = Math.floor(Math.random() * (k + 1));
+          [tier[k], tier[m]] = [tier[m], tier[k]];
+        }
+        shuffled.push(...tier);
+        ci = cj;
+      }
+      candidates = shuffled.slice(0, 8);
+
+      if (candidates.length === 0) {
+        return `Found mood tags [${queryTags.join(", ")}] but no diverse matches after filtering similar artists. Try playing a different track.`;
+      }
+
+      // Step 6: Resolve on Spotify in parallel
+      const resolved = (await Promise.all(
+        candidates.map(c => resolveOnSpotify(c.name, c.artist))
+      )).filter((r): r is SearchResult => r !== null);
+
+      if (resolved.length === 0) return "Found mood-matching tracks via Last.fm but could not match any on Spotify.";
+
+      // Step 7: Play first, queue rest
+      await spotify.play({ trackUri: resolved[0].uri });
+      pushStateAfterCommand();
+
+      const toQueue = resolved.slice(1, 6);
+      const queueResults = await Promise.all(
+        toQueue.map(async (track) => {
+          try {
+            await spotify.addToQueue(track.uri);
+            return `"${track.name}" by ${track.artist}`;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const queued = queueResults.filter((q): q is string => q !== null);
+
+      const moodDesc = queryTags.join(", ");
+      const queueLine = queued.length > 0
+        ? `\n\nQueued ${queued.length} varied tracks:\n${queued.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
+        : "";
+      const prefix = council ? `[Mood discovery: ${moodDesc}] ` : "";
+      return `${prefix}Now playing "${resolved[0].name}" by ${resolved[0].artist} (mood: ${moodDesc}, varied from "${state.trackName}")${queueLine}`;
+    } catch (err: any) {
+      if (err?.message?.includes("Last.fm API key not configured")) {
+        return "Last.fm API key is not configured. Please add it in the Spotify Controls settings.";
+      }
+      return `Mood discovery failed: ${err?.message}`;
     }
   }
 

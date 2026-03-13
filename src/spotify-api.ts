@@ -441,15 +441,43 @@ export async function getSimilarArtists(artist: string, limit = 10): Promise<str
   return (data.similarartists?.artist || []).map((a: any) => a.name);
 }
 
-export async function getTopTracksByTag(tag: string, limit = 15): Promise<{ name: string; artist: string }[]> {
+export async function getTopTracksByTag(tag: string, limit = 15, page = 1): Promise<{ name: string; artist: string }[]> {
   const data = await lastfmFetch("tag.getTopTracks", {
     tag,
-    num_res: String(limit),
+    limit: String(limit),
+    page: String(page),
   });
   return (data.tracks?.track || []).map((t: any) => ({
     name: t.name,
     artist: t.artist?.name || "",
   }));
+}
+
+export async function getTrackTopTags(track: string, artist: string): Promise<{ name: string; count: number }[]> {
+  const data = await lastfmFetch("track.getTopTags", {
+    track,
+    artist,
+    autocorrect: "1",
+  });
+  return (data.toptags?.tag || [])
+    .map((t: any) => ({
+      name: ((t.name as string) || "").toLowerCase().trim(),
+      count: parseInt(t.count) || 0,
+    }))
+    .filter((t: { name: string; count: number }) => t.count > 0);
+}
+
+export async function getArtistTopTags(artist: string): Promise<{ name: string; count: number }[]> {
+  const data = await lastfmFetch("artist.getTopTags", {
+    artist,
+    autocorrect: "1",
+  });
+  return (data.toptags?.tag || [])
+    .map((t: any) => ({
+      name: ((t.name as string) || "").toLowerCase().trim(),
+      count: parseInt(t.count) || 0,
+    }))
+    .filter((t: { name: string; count: number }) => t.count > 0);
 }
 
 // ─── OAuth token exchange ────────────────────────────────────────────────
