@@ -686,7 +686,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       }
 
       // Query Last.fm for similar tracks (autocorrect enabled, sorted by match score)
-      const similar = await spotify.getSimilarTracks(state.trackName, state.artistName);
+      const similar = await spotify.getSimilarTracks(state.trackName, state.artistName, 5);
 
       if (similar.length === 0) {
         // Fallback: search Spotify for more by this artist
@@ -697,28 +697,29 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         return `No Last.fm similarity data — playing "${results[0].name}" by ${results[0].artist} (more by artist)`;
       }
 
-      // Resolve top candidates on Spotify using just "track artist" — no mood strings
-      const toResolve = similar.slice(0, 8);
+      // Resolve candidates on Spotify in parallel — just "track artist", no mood strings
       const resolved = (await Promise.all(
-        toResolve.map((c) => resolveOnSpotify(c.name, c.artist))
+        similar.map((c) => resolveOnSpotify(c.name, c.artist))
       )).filter((r): r is SearchResult => r !== null);
 
       if (resolved.length === 0) return "Found similar tracks via Last.fm but could not match any on Spotify.";
 
-      // Play the first track
+      // Play the first track and queue the rest in parallel
       await spotify.play({ trackUri: resolved[0].uri });
       pushStateAfterCommand();
 
-      // Queue the rest
-      const queued: string[] = [];
-      for (const track of resolved.slice(1)) {
-        try {
-          await spotify.addToQueue(track.uri);
-          queued.push(`"${track.name}" by ${track.artist}`);
-        } catch {
-          // Skip tracks that fail to queue
-        }
-      }
+      const toQueue = resolved.slice(1);
+      const queueResults = await Promise.all(
+        toQueue.map(async (track) => {
+          try {
+            await spotify.addToQueue(track.uri);
+            return `"${track.name}" by ${track.artist}`;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const queued = queueResults.filter((q): q is string => q !== null);
 
       const queueLine = queued.length > 0 ? `\n\nQueued ${queued.length} similar tracks:\n${queued.map((q, i) => `${i + 1}. ${q}`).join("\n")}` : "";
       const prefix = council ? `[Similar music] ` : "";
