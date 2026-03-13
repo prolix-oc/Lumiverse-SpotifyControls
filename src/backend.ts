@@ -793,70 +793,65 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   // ── spotify_mood_discover: mood-matched but varied discovery ────────
   if (toolName === "spotify_mood_discover") {
     try {
-      const state = lastState || await spotify.getCurrentPlayback();
+      // Use cached state to avoid an extra API call
+      const state = lastState;
       if (!state?.trackName || !state?.artistName) {
         return "Nothing is currently playing. Play something first so we can discover mood-matching music.";
       }
 
-      // Step 1: Get mood signals — current track's tags + similar artists (blocklist) in parallel
-      const [trackTags, similarArtists] = await Promise.all([
+      // ── Batch 1: Fetch ALL Last.fm data in one parallel burst ─────
+      // Includes artist tags as a fallback so we never need a sequential retry
+      const [trackTags, artistTags, similarArtists] = await Promise.all([
         spotify.getTrackTopTags(state.trackName, state.artistName).catch(() => []),
-        spotify.getSimilarArtists(state.artistName, 10).catch(() => []),
+        spotify.getArtistTopTags(state.artistName).catch(() => []),
+        spotify.getSimilarArtists(state.artistName, 5).catch(() => []),
       ]);
 
-      const trackMoodTags = extractMoodTags(trackTags);
+      // Extract mood tags from track, falling back to artist
+      let moodTags = extractMoodTags(trackTags);
+      if (moodTags.length === 0) moodTags = extractMoodTags(artistTags, 0);
 
-      // Step 2: Get mood signals from scene context (council invocations)
-      const contextMoodTags: string[] = [];
+      // Merge with scene context mood tags (council invocations)
       if (council && context) {
         const moodStr = extractMoodFromContext(context);
         if (moodStr) {
+          const contextTags: string[] = [];
           for (const mood of moodStr.split(" ")) {
             const mapped = MOOD_TO_LASTFM_TAGS[mood];
-            if (mapped) contextMoodTags.push(...mapped);
+            if (mapped) contextTags.push(...mapped);
           }
+          moodTags = [...new Set([...contextTags, ...moodTags])];
         }
-      }
-
-      // Step 3: Merge mood tags — context first (scene-driven), then track's own tags
-      let moodTags = [...new Set([...contextMoodTags, ...trackMoodTags])];
-
-      // Fallback: try the artist's tags if the track had no mood tags
-      if (moodTags.length === 0) {
-        const artistTags = await spotify.getArtistTopTags(state.artistName).catch(() => []);
-        moodTags = extractMoodTags(artistTags, 0);
       }
 
       if (moodTags.length === 0) {
         return `Could not determine the mood of "${state.trackName}" by ${state.artistName}. No mood tags found on Last.fm.`;
       }
 
-      // Step 4: Query tag.getTopTracks for top 3 mood tags
-      // Random page offset (1-3) so repeated invocations yield different results
-      const queryTags = moodTags.slice(0, 3);
+      // ── Batch 2: Query tag.getTopTracks for top 2 mood tags ───────
+      const queryTags = moodTags.slice(0, 2);
       const page = Math.floor(Math.random() * 3) + 1;
       const tagResults = await Promise.all(
-        queryTags.map(tag => spotify.getTopTracksByTag(tag, 30, page).catch(() => []))
+        queryTags.map(tag => spotify.getTopTracksByTag(tag, 20, page).catch(() => []))
       );
 
-      // Step 5: Build candidate pool — score, filter, diversify
+      // ── Build candidate pool — score, filter, diversify (CPU only) ─
       const blockedArtists = new Set(similarArtists.map(a => a.toLowerCase()));
       blockedArtists.add(state.artistName.toLowerCase());
       const currentTrackLower = state.trackName.toLowerCase();
+      const currentArtistLower = state.artistName.toLowerCase();
 
       const candidateMap = new Map<string, { name: string; artist: string; score: number }>();
       for (const tracks of tagResults) {
         for (const track of tracks) {
           const artistLower = track.artist.toLowerCase();
-
-          // Variety filter: skip current track, current artist, and similar artists
-          if (track.name.toLowerCase() === currentTrackLower && artistLower === state.artistName.toLowerCase()) continue;
+          if (track.name.toLowerCase() === currentTrackLower && artistLower === currentArtistLower) continue;
           if (blockedArtists.has(artistLower)) continue;
 
           const key = `${track.name.toLowerCase()}::${artistLower}`;
           const existing = candidateMap.get(key);
           if (existing) {
-            existing.score++; // Multi-tag match = stronger mood confidence
+            existing.score++;
           } else {
             candidateMap.set(key, { name: track.name, artist: track.artist, score: 1 });
           }
@@ -865,7 +860,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
 
       let candidates = Array.from(candidateMap.values());
 
-      // Max 1 track per artist to prevent clustering
+      // Max 1 track per artist
       const seenArtists = new Set<string>();
       candidates = candidates.filter(c => {
         const a = c.artist.toLowerCase();
@@ -874,7 +869,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         return true;
       });
 
-      // Sort by score then shuffle within each score tier for randomness
+      // Sort by score, shuffle within tiers
       candidates.sort((a, b) => b.score - a.score);
       const shuffled: typeof candidates = [];
       let ci = 0;
@@ -889,35 +884,33 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         shuffled.push(...tier);
         ci = cj;
       }
-      candidates = shuffled.slice(0, 8);
+      candidates = shuffled.slice(0, 5);
 
       if (candidates.length === 0) {
         return `Found mood tags [${queryTags.join(", ")}] but no diverse matches after filtering similar artists. Try playing a different track.`;
       }
 
-      // Step 6: Resolve on Spotify in parallel
+      // ── Batch 3: Resolve on Spotify + play in one burst ───────────
       const resolved = (await Promise.all(
         candidates.map(c => resolveOnSpotify(c.name, c.artist))
       )).filter((r): r is SearchResult => r !== null);
 
       if (resolved.length === 0) return "Found mood-matching tracks via Last.fm but could not match any on Spotify.";
 
-      // Step 7: Play first, queue rest
+      // Play first track; queue rest in parallel with the state push
       await spotify.play({ trackUri: resolved[0].uri });
       pushStateAfterCommand();
 
-      const toQueue = resolved.slice(1, 6);
-      const queueResults = await Promise.all(
+      const toQueue = resolved.slice(1);
+      const queued: string[] = [];
+      await Promise.all(
         toQueue.map(async (track) => {
           try {
             await spotify.addToQueue(track.uri);
-            return `"${track.name}" by ${track.artist}`;
-          } catch {
-            return null;
-          }
+            queued.push(`"${track.name}" by ${track.artist}`);
+          } catch {}
         })
       );
-      const queued = queueResults.filter((q): q is string => q !== null);
 
       const moodDesc = queryTags.join(", ");
       const queueLine = queued.length > 0
