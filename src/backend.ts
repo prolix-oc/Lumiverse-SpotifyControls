@@ -514,13 +514,11 @@ spindle.registerTool({
 spindle.registerTool({
   name: "spotify_search_similar",
   display_name: "Find & Play Similar Music",
-  description: "Find music similar to what is currently playing and start playback. Uses the current track to query Last.fm for similar songs, optionally filtered by mood/genre tags. Resolves the best match on Spotify and plays it, queuing additional similar tracks. Requires Last.fm API key.",
+  description: "Find music similar to what is currently playing and start playback. Uses Last.fm's track similarity data (based on listening patterns, not genre tags) to find genuinely related tracks, then resolves and plays them on Spotify. Queues additional similar tracks automatically. Requires a track to be currently playing and a Last.fm API key.",
   council_eligible: true,
   parameters: {
     type: "object",
-    properties: {
-      mood: { type: "string", description: "Optional mood/genre tags to influence discovery (e.g. 'dark ambient', 'synthwave', 'chill electronic'). Combined with the currently playing track for better results." },
-    },
+    properties: {},
     required: [],
   },
 });
@@ -681,77 +679,26 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   // ── spotify_search_similar: similar music discovery + play ───────────
   if (toolName === "spotify_search_similar") {
     try {
-      let mood = args.mood as string | undefined;
-
-      // Council invocation: extract mood from context
-      if (council) {
-        mood = extractMoodFromContext(context) || undefined;
-      }
-
-      // Get the currently playing track
+      // Get the currently playing track — this is the sole seed for similarity
       const state = lastState || await spotify.getCurrentPlayback();
-      const hasCurrentTrack = state?.trackName && state?.artistName;
-
-      if (!hasCurrentTrack && !mood) {
-        return "Nothing is currently playing and no mood provided. Play something first or provide a mood.";
+      if (!state?.trackName || !state?.artistName) {
+        return "Nothing is currently playing. Play something first so we can find similar tracks.";
       }
 
-      // Gather candidates from Last.fm in parallel
-      const candidates: { name: string; artist: string }[] = [];
-      const sources: string[] = [];
+      // Query Last.fm for similar tracks (autocorrect enabled, sorted by match score)
+      const similar = await spotify.getSimilarTracks(state.trackName, state.artistName);
 
-      const promises: Promise<void>[] = [];
-
-      // Similar tracks from Last.fm (based on current song)
-      if (hasCurrentTrack) {
-        promises.push(
-          spotify.getSimilarTracks(state!.trackName, state!.artistName)
-            .then((tracks) => {
-              candidates.push(...tracks);
-              if (tracks.length > 0) sources.push(`similar to "${state!.trackName}" by ${state!.artistName}`);
-            })
-            .catch(() => { /* Last.fm unavailable — continue with other sources */ })
-        );
-      }
-
-      // Tag-based tracks from Last.fm (based on mood)
-      if (mood) {
-        promises.push(
-          spotify.getTopTracksByTag(mood)
-            .then((tracks) => {
-              candidates.push(...tracks);
-              if (tracks.length > 0) sources.push(`mood "${mood}"`);
-            })
-            .catch(() => { /* Last.fm unavailable — continue with other sources */ })
-        );
-      }
-
-      await Promise.all(promises);
-
-      // Deduplicate by name+artist (case-insensitive)
-      const seen = new Set<string>();
-      const unique = candidates.filter((c) => {
-        const key = `${c.name.toLowerCase()}::${c.artist.toLowerCase()}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-
-      if (unique.length === 0) {
-        // Fallback: search Spotify directly with combined terms
-        const fallbackQuery = [
-          hasCurrentTrack ? state!.artistName : "",
-          mood || "",
-        ].filter(Boolean).join(" ");
-        const results = await spotify.search(fallbackQuery);
-        if (results.length === 0) return "Could not find similar music.";
+      if (similar.length === 0) {
+        // Fallback: search Spotify for more by this artist
+        const results = await spotify.search(state.artistName);
+        if (results.length === 0) return `No similar tracks found for "${state.trackName}" by ${state.artistName}.`;
         await spotify.play({ trackUri: results[0].uri });
         pushStateAfterCommand();
-        return `Now playing "${results[0].name}" by ${results[0].artist} (Spotify search fallback for "${fallbackQuery}")`;
+        return `No Last.fm similarity data — playing "${results[0].name}" by ${results[0].artist} (more by artist)`;
       }
 
-      // Resolve top candidates on Spotify (limit to 8 to avoid excessive API calls)
-      const toResolve = unique.slice(0, 8);
+      // Resolve top candidates on Spotify using just "track artist" — no mood strings
+      const toResolve = similar.slice(0, 8);
       const resolved = (await Promise.all(
         toResolve.map((c) => resolveOnSpotify(c.name, c.artist))
       )).filter((r): r is SearchResult => r !== null);
@@ -773,10 +720,9 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         }
       }
 
-      const sourceLine = sources.length > 0 ? `\nSources: ${sources.join(", ")}` : "";
       const queueLine = queued.length > 0 ? `\n\nQueued ${queued.length} similar tracks:\n${queued.map((q, i) => `${i + 1}. ${q}`).join("\n")}` : "";
       const prefix = council ? `[Similar music] ` : "";
-      return `${prefix}Now playing "${resolved[0].name}" by ${resolved[0].artist}${sourceLine}${queueLine}`;
+      return `${prefix}Now playing "${resolved[0].name}" by ${resolved[0].artist} (similar to "${state.trackName}" by ${state.artistName})${queueLine}`;
     } catch (err: any) {
       if (err?.message?.includes("Last.fm API key not configured")) {
         return "Last.fm API key is not configured. Please add it in the Spotify Controls settings.";

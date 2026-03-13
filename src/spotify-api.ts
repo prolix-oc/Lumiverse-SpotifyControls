@@ -411,16 +411,26 @@ async function lastfmFetch(method: string, params: Record<string, string>): Prom
   return JSON.parse(res.body);
 }
 
-export async function getSimilarTracks(track: string, artist: string, limit = 15): Promise<{ name: string; artist: string }[]> {
+export interface SimilarTrack {
+  name: string;
+  artist: string;
+  match: number;
+}
+
+export async function getSimilarTracks(track: string, artist: string, limit = 15): Promise<SimilarTrack[]> {
   const data = await lastfmFetch("track.getSimilar", {
     track,
     artist,
+    autocorrect: "1",
     limit: String(limit),
   });
-  return (data.similartracks?.track || []).map((t: any) => ({
-    name: t.name,
-    artist: t.artist?.name || "",
-  }));
+  return (data.similartracks?.track || [])
+    .map((t: any) => ({
+      name: t.name,
+      artist: t.artist?.name || "",
+      match: parseFloat(t.match) || 0,
+    }))
+    .sort((a: SimilarTrack, b: SimilarTrack) => b.match - a.match);
 }
 
 export async function getSimilarArtists(artist: string, limit = 10): Promise<string[]> {
