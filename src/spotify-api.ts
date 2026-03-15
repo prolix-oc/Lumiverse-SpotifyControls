@@ -47,6 +47,24 @@ function basicAuthHeader(clientId: string, clientSecret: string): string {
   return "Basic " + btoa(`${clientId}:${clientSecret}`);
 }
 
+function formatSpotifyAuthError(action: string, status: number, body: string): string {
+  if (!body) return `${action} failed (${status})`;
+
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: string;
+      error_description?: string;
+      message?: string;
+    };
+    const details = [parsed.error, parsed.error_description || parsed.message].filter(Boolean).join(": ");
+    if (details) return `${action} failed (${status}): ${details}`;
+  } catch {
+    // Fall back to raw body if Spotify did not return JSON.
+  }
+
+  return `${action} failed (${status}): ${body}`;
+}
+
 /**
  * Refresh the access token using the stored refresh_token and client credentials.
  * Spotify Authorization Code Flow: POST /api/token with
@@ -70,8 +88,7 @@ async function refreshAccessToken(): Promise<string> {
   })) as { status: number; body: string };
 
   if (res.status !== 200) {
-    const errBody = res.body || "";
-    throw new Error(`Token refresh failed (${res.status}): ${errBody}`);
+    throw new Error(formatSpotifyAuthError("Token refresh", res.status, res.body || ""));
   }
 
   const json = JSON.parse(res.body);
@@ -504,8 +521,7 @@ export async function exchangeCodeForTokens(
   })) as { status: number; body: string };
 
   if (res.status !== 200) {
-    const errBody = res.body || "";
-    throw new Error(`Token exchange failed (${res.status}): ${errBody}`);
+    throw new Error(formatSpotifyAuthError("Token exchange", res.status, res.body || ""));
   }
 
   const json = JSON.parse(res.body);

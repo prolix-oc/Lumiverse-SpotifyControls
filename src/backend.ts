@@ -209,7 +209,7 @@ spindle.oauth.onCallback(async (params) => {
   } catch (err: any) {
     spindle.log.error(`OAuth token exchange failed: ${err?.message}`);
     send({ type: "error", message: `Authentication failed: ${err?.message}` });
-    return { html: errorPage("Token exchange failed. Please try again.") };
+    return { html: errorPage(err?.message || "Token exchange failed. Please try again.") };
   }
 });
 
