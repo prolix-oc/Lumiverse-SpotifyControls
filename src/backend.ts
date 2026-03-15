@@ -703,7 +703,7 @@ function isCouncilInvocation(args: Record<string, unknown> | undefined): boolean
   if (!args) return false;
   // Council invocations carry a `context` key injected by the backend;
   // direct LLM tool calls pass explicit parameters like query, uri, mode, etc.
-  const keys = Object.keys(args);
+  const keys = Object.keys(args).filter((key) => !key.startsWith("__"));
   return keys.length === 1 && keys[0] === "context";
 }
 
@@ -850,12 +850,18 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   const rawName = payload.toolName;
   const toolName = rawName.includes(":") ? rawName.split(":").pop()! : rawName;
   const args: Record<string, unknown> = payload.args ?? {};
+  const toolUserId = typeof args.__userId === "string" ? args.__userId : null;
   const council = isCouncilInvocation(args);
   const context: string = (args.context as string) || "";
 
-  // Tool invocations don't carry a userId, so tokens may not be loaded yet
-  // (e.g. after a hot reload before the frontend reconnects). Try to load
-  // them if we have a previously-set activeUserId.
+  if (toolUserId) {
+    await handleUserChange(toolUserId);
+  } else if (!activeUserId) {
+    return "Spotify Controls has no active user context for this tool invocation yet. Open the extension once, then try again.";
+  }
+
+  // Tool invocations may arrive before tokens are loaded in this worker
+  // (e.g. after a hot reload). Ensure we have a connected user context.
   if (!spotify.isConnected()) {
     await spotify.loadTokens();
   }
