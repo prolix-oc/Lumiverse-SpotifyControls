@@ -153,9 +153,19 @@ export async function getCurrentPlayback(): Promise<PlaybackState | null> {
   if (res.status === 204 || !res.body || res.body.trim() === "") return null;
   if (res.status !== 200) return null;
 
-  const data = JSON.parse(res.body);
-  if (!data.item) return null;
+  return parsePlaybackState(JSON.parse(res.body));
+}
 
+export async function getCurrentlyPlaying(): Promise<PlaybackState | null> {
+  const res = await spotifyFetch("/me/player/currently-playing");
+  if (res.status === 204 || !res.body || res.body.trim() === "") return null;
+  if (res.status !== 200) return null;
+
+  return parsePlaybackState(JSON.parse(res.body));
+}
+
+function parsePlaybackState(data: any): PlaybackState | null {
+  if (!data?.item) return null;
   const images = data.item.album?.images ?? [];
   return {
     isPlaying: data.is_playing,

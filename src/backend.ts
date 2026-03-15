@@ -97,6 +97,7 @@ async function handleUserChange(userId: string): Promise<void> {
   activeUserId = userId;
   spotify.setActiveUser(userId);
   await migrateToEnclave(userId);
+  await loadCachedState(userId);
   await spotify.loadTokens();
   if (spotify.isConnected()) {
     startPolling();
@@ -112,9 +113,9 @@ import type { PlaybackState } from "./types";
 let lastState: PlaybackState | null = null;
 let lastStateUpdatedAt = 0;
 
-async function loadCachedState(): Promise<void> {
+async function loadCachedState(userId: string): Promise<void> {
   try {
-    lastState = await spindle.storage.getJson<PlaybackState>("last_state.json");
+    lastState = await spindle.userStorage.getJson<PlaybackState>("last_state.json", { userId });
     lastStateUpdatedAt = 0;
   } catch {
     lastState = null;
@@ -125,8 +126,12 @@ async function loadCachedState(): Promise<void> {
 async function cacheState(state: PlaybackState | null): Promise<void> {
   lastState = state;
   lastStateUpdatedAt = state ? Date.now() : 0;
+  if (!activeUserId) return;
+
   if (state) {
-    await spindle.storage.setJson("last_state.json", state).catch(() => {});
+    await spindle.userStorage.setJson("last_state.json", state, { userId: activeUserId }).catch(() => {});
+  } else {
+    await spindle.userStorage.delete("last_state.json", activeUserId).catch(() => {});
   }
 }
 
@@ -802,9 +807,15 @@ async function getPlaybackSeedState(): Promise<PlaybackState | null> {
       await cacheState(current);
       return current;
     }
+    const currentlyPlaying = await spotify.getCurrentlyPlaying();
+    if (currentlyPlaying) {
+      await cacheState(currentlyPlaying);
+      return currentlyPlaying;
+    }
     return null;
   } catch {
     if (lastState && Date.now() - lastStateUpdatedAt < 60_000) {
+      spindle.log.warn(`[playback_seed] Falling back to cached state "${lastState.trackName}" by ${lastState.artistName}`);
       return lastState;
     }
     return null;
@@ -1167,6 +1178,5 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
 // ─── Init ────────────────────────────────────────────────────────────────
 
 (async () => {
-  await loadCachedState();
   spindle.log.info("Spotify Controls loaded!");
 })();
