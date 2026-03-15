@@ -670,6 +670,34 @@ function extractMoodTags(tags: { name: string; count: number }[], minCount = 5):
     .map(t => t.name);
 }
 
+const GENERIC_TAG_SET = new Set([
+  "favorites", "favourite", "favorite", "loved", "seen live", "albums i own",
+  "my spotigram sundays", "under 2000 listeners", "spotify", "lastfm", "good",
+]);
+
+function extractFlavorTags(tags: { name: string; count: number }[], minCount = 5, limit = 6): string[] {
+  return tags
+    .filter((t) => t.count >= minCount)
+    .map((t) => t.name)
+    .filter((name) =>
+      !MOOD_TAG_SET.has(name) &&
+      !GENERIC_TAG_SET.has(name) &&
+      !/^\d{4}s$/.test(name) &&
+      !/^\d{2}s$/.test(name) &&
+      name.length >= 3
+    )
+    .slice(0, limit);
+}
+
+function overlapCount(a: Iterable<string>, b: Iterable<string>): number {
+  const bSet = new Set(Array.from(b, (value) => value.toLowerCase()));
+  let count = 0;
+  for (const value of a) {
+    if (bSet.has(value.toLowerCase())) count += 1;
+  }
+  return count;
+}
+
 /** Score a context string against mood categories and return the top N mood
  *  descriptors suitable for a Spotify/Last.fm search query. */
 function extractMoodFromContext(context: string, topN = 3): string {
@@ -744,6 +772,23 @@ const councilPlaybackSessions = new Map<string, {
   actionRequestId: string | null;
 }>();
 const COUNCIL_PLAYBACK_SESSION_MS = 20_000;
+const RECENT_DISCOVERY_FILE = "recent_mood_discover.json";
+const RECENT_DISCOVERY_LIMIT = 20;
+const RECENT_DISCOVERY_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
+
+type DiscoveryCandidate = {
+  name: string;
+  artist: string;
+  score: number;
+  source: string[];
+};
+
+type RecentDiscoveryEntry = {
+  key: string;
+  name: string;
+  artist: string;
+  ts: number;
+};
 
 function getToolInvocationKey(toolName: string, userId: string | null): string {
   return `${userId || "unknown"}:${toolName}`;
@@ -761,6 +806,63 @@ function ensureInvocationActive(
   if (deadlineMs && Date.now() >= deadlineMs - 150) {
     throw new Error(`Invocation deadline reached${stage ? ` before ${stage}` : ""}`);
   }
+}
+
+function candidateKey(name: string, artist: string): string {
+  return `${name.toLowerCase()}::${artist.toLowerCase()}`;
+}
+
+function addDiscoveryCandidate(
+  map: Map<string, DiscoveryCandidate>,
+  name: string,
+  artist: string,
+  score: number,
+  source: string
+): void {
+  const key = candidateKey(name, artist);
+  const existing = map.get(key);
+  if (existing) {
+    existing.score += score;
+    if (!existing.source.includes(source)) existing.source.push(source);
+    return;
+  }
+  map.set(key, { name, artist, score, source: [source] });
+}
+
+async function loadRecentMoodDiscoveries(): Promise<RecentDiscoveryEntry[]> {
+  if (!activeUserId) return [];
+  const entries = await spindle.userStorage.getJson<RecentDiscoveryEntry[]>(RECENT_DISCOVERY_FILE, {
+    fallback: [],
+    userId: activeUserId,
+  }).catch(() => []);
+  const cutoff = Date.now() - RECENT_DISCOVERY_WINDOW_MS;
+  return entries.filter((entry) => entry.ts >= cutoff);
+}
+
+async function saveRecentMoodDiscoveries(entries: RecentDiscoveryEntry[]): Promise<void> {
+  if (!activeUserId) return;
+  await spindle.userStorage.setJson(RECENT_DISCOVERY_FILE, entries.slice(0, RECENT_DISCOVERY_LIMIT), {
+    userId: activeUserId,
+  }).catch(() => {});
+}
+
+async function rememberMoodDiscoveries(results: SearchResult[]): Promise<void> {
+  const existing = await loadRecentMoodDiscoveries();
+  const now = Date.now();
+  const merged = [
+    ...results.map((result) => ({
+      key: candidateKey(result.name, result.artist),
+      name: result.name,
+      artist: result.artist,
+      ts: now,
+    })),
+    ...existing,
+  ];
+  const deduped = new Map<string, RecentDiscoveryEntry>();
+  for (const entry of merged) {
+    if (!deduped.has(entry.key)) deduped.set(entry.key, entry);
+  }
+  await saveRecentMoodDiscoveries(Array.from(deduped.values()));
 }
 
 async function getCouncilPlaybackSession(userId: string, requestId: string): Promise<{
@@ -836,6 +938,49 @@ function scoreResolvedTrackMatch(trackName: string, artist: string, result: Sear
   }
 
   return score;
+}
+
+async function enrichCandidatesWithTagAffinity(
+  candidates: DiscoveryCandidate[],
+  seedFlavorTags: string[],
+  moodTags: string[],
+  readTimeout: number
+): Promise<DiscoveryCandidate[]> {
+  if (candidates.length === 0) return candidates;
+
+  const shortlist = candidates.slice(0, 8);
+  const seedFlavorSet = new Set(seedFlavorTags.map((tag) => tag.toLowerCase()));
+  const moodTagSet = new Set(moodTags.map((tag) => tag.toLowerCase()));
+
+  const enriched = await Promise.all(shortlist.map(async (candidate) => {
+    const [artistTags, trackTags] = await Promise.all([
+      timedSafe(spotify.getArtistTopTags(candidate.artist), readTimeout, `artist.getTopTags("${candidate.artist}")`, []),
+      timedSafe(spotify.getTrackTopTags(candidate.name, candidate.artist), readTimeout, `track.getTopTags("${candidate.name}")`, []),
+    ]);
+
+    const candidateFlavor = new Set([
+      ...extractFlavorTags(trackTags, 0, 5),
+      ...extractFlavorTags(artistTags, 0, 5),
+    ]);
+    const candidateMood = new Set([
+      ...extractMoodTags(trackTags, 0),
+      ...extractMoodTags(artistTags, 0),
+    ]);
+
+    let score = candidate.score;
+    const flavorOverlap = overlapCount(seedFlavorSet, candidateFlavor);
+    const moodOverlap = overlapCount(moodTagSet, candidateMood);
+    score += flavorOverlap * 4;
+    score += moodOverlap * 2;
+    if (candidateFlavor.size > 0 && flavorOverlap === 0 && seedFlavorSet.size > 0) score -= 3;
+
+    const source = [...candidate.source];
+    if (flavorOverlap > 0) source.push(`flavor:${flavorOverlap}`);
+    if (moodOverlap > 0) source.push(`mood:${moodOverlap}`);
+    return { ...candidate, score, source };
+  }));
+
+  return [...enriched, ...candidates.slice(shortlist.length)];
 }
 
 /** Resolve a Last.fm track recommendation to a Spotify search result. */
@@ -1122,16 +1267,13 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         }
       }
 
-      // ── Batch 1: Fetch Last.fm data in parallel ────────────────
       const needTagFallback = moodTags.length === 0;
-      const [trackTags, artistTags, similarArtists] = await Promise.all([
-        needTagFallback
-          ? timedSafe(spotify.getTrackTopTags(state.trackName, state.artistName), READ_TIMEOUT, "track.getTopTags", [])
-          : Promise.resolve([]),
-        needTagFallback
-          ? timedSafe(spotify.getArtistTopTags(state.artistName), READ_TIMEOUT, "artist.getTopTags", [])
-          : Promise.resolve([]),
-        timedSafe(spotify.getSimilarArtists(state.artistName, 5), READ_TIMEOUT, "artist.getSimilar", []),
+      const [trackTags, artistTags, similarArtists, similarTracks, recentDiscoveries] = await Promise.all([
+        timedSafe(spotify.getTrackTopTags(state.trackName, state.artistName), READ_TIMEOUT, "track.getTopTags", []),
+        timedSafe(spotify.getArtistTopTags(state.artistName), READ_TIMEOUT, "artist.getTopTags", []),
+        timedSafe(spotify.getSimilarArtists(state.artistName, 8), READ_TIMEOUT, "artist.getSimilar", []),
+        timedSafe(spotify.getSimilarTracks(state.trackName, state.artistName, 12), READ_TIMEOUT, "track.getSimilar", []),
+        loadRecentMoodDiscoveries(),
       ]);
 
       if (needTagFallback) {
@@ -1146,44 +1288,75 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
       }
 
-      // ── Batch 2: Query tag.getTopTracks for top 2 mood tags ───────
-      const queryTags = moodTags.slice(0, 2);
-      const page = Math.floor(Math.random() * 3) + 1;
-      spindle.log.info(`[mood_discover] Querying tag.getTopTracks for [${queryTags.join(", ")}] page=${page}`);
-      const tagResults = await Promise.all(
-        queryTags.map(tag =>
-          timedSafe(spotify.getTopTracksByTag(tag, 20, page), READ_TIMEOUT, `tag.getTopTracks("${tag}")`, [])
-        )
-      );
-
-      // ── Build candidate pool — score, filter, diversify (CPU only) ─
-      const similarArtistSet = new Set(similarArtists.map(a => a.toLowerCase()));
+      const seedFlavorTags = [...new Set([
+        ...extractFlavorTags(trackTags),
+        ...extractFlavorTags(artistTags, 0),
+      ])].slice(0, 6);
+      const recentKeys = new Set(recentDiscoveries.map((entry) => entry.key));
+      const similarArtistSet = new Set([state.artistName, ...similarArtists].map((artist) => artist.toLowerCase()));
       const currentTrackLower = state.trackName.toLowerCase();
       const currentArtistLower = state.artistName.toLowerCase();
 
-      const candidateMap = new Map<string, { name: string; artist: string; score: number }>();
-      for (const tracks of tagResults) {
-        for (const [index, track] of tracks.entries()) {
+      const candidateMap = new Map<string, DiscoveryCandidate>();
+
+      for (const similar of similarTracks) {
+        const artistLower = similar.artist.toLowerCase();
+        if (similar.name.toLowerCase() === currentTrackLower && artistLower === currentArtistLower) continue;
+        const similarityScore = Math.round(similar.match * 24) + 12;
+        addDiscoveryCandidate(candidateMap, similar.name, similar.artist, similarityScore, "track-similar");
+      }
+
+      const queryTags = moodTags.slice(0, 3);
+      const tagPages = Array.from(new Set([
+        Math.floor(Math.random() * 4) + 1,
+        Math.floor(Math.random() * 6) + 3,
+      ])).sort((a, b) => a - b);
+      spindle.log.info(`[mood_discover] Querying tag.getTopTracks for [${queryTags.join(", ")}] pages=${tagPages.join(",")}`);
+      const tagResults = await Promise.all(
+        queryTags.flatMap((tag) =>
+          tagPages.map(async (page) => ({
+            tag,
+            page,
+            tracks: await timedSafe(
+              spotify.getTopTracksByTag(tag, 20, page),
+              READ_TIMEOUT,
+              `tag.getTopTracks("${tag}", page=${page})`,
+              []
+            ),
+          }))
+        )
+      );
+
+      for (const result of tagResults) {
+        for (const [index, track] of result.tracks.entries()) {
           const artistLower = track.artist.toLowerCase();
           if (track.name.toLowerCase() === currentTrackLower && artistLower === currentArtistLower) continue;
 
-          const key = `${track.name.toLowerCase()}::${artistLower}`;
-          const scoreBoost = Math.max(1, 6 - index);
-          const existing = candidateMap.get(key);
-          if (existing) {
-            existing.score += scoreBoost;
-          } else {
-            candidateMap.set(key, { name: track.name, artist: track.artist, score: scoreBoost });
-          }
+          let scoreBoost = Math.max(1, 7 - index);
+          if (similarArtistSet.has(artistLower)) scoreBoost += 5;
+          else scoreBoost -= 2;
+          if (result.page > 1) scoreBoost += 1;
+          addDiscoveryCandidate(candidateMap, track.name, track.artist, scoreBoost, `tag:${result.tag}:p${result.page}`);
         }
       }
 
-      let candidates = Array.from(candidateMap.values())
+      let candidates = await enrichCandidatesWithTagAffinity(
+        Array.from(candidateMap.values()),
+        seedFlavorTags,
+        moodTags,
+        READ_TIMEOUT
+      );
+
+      candidates = candidates
         .map((candidate) => {
           let adjustedScore = candidate.score;
           const artistLower = candidate.artist.toLowerCase();
-          if (artistLower === currentArtistLower) adjustedScore -= 4;
-          if (similarArtistSet.has(artistLower)) adjustedScore -= 2;
+          const key = candidateKey(candidate.name, candidate.artist);
+          if (artistLower === currentArtistLower) adjustedScore -= 6;
+          if (similarArtistSet.has(artistLower)) adjustedScore += 4;
+          else adjustedScore -= 3;
+          if (recentKeys.has(key)) adjustedScore -= 12;
+          adjustedScore += Math.random() * 2;
           return { ...candidate, score: adjustedScore };
         })
         .filter((candidate) => candidate.score > 0);
@@ -1210,10 +1383,10 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         if (seenArtists.has(artistKey)) return false;
         seenArtists.add(artistKey);
         return true;
-      }).slice(0, 6);
+      }).slice(0, 8);
 
       if (candidates.length === 0) {
-        const totalResults = tagResults.reduce((n, r) => n + r.length, 0);
+        const totalResults = tagResults.reduce((n, r) => n + r.tracks.length, 0);
         const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
         spindle.log.info(`[mood_discover] ${totalResults} raw results but no ranked candidates; falling back to Spotify query "${fallbackQuery}"`);
         return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
@@ -1242,6 +1415,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       // Queue remaining in the background so discovery returns quickly even on
       // slower connections.
       const toQueue = resolved.slice(1, 4);
+      await rememberMoodDiscoveries(resolved.slice(0, 4));
       if (toQueue.length > 0) {
         void Promise.allSettled(
           toQueue.map(async (track) => {
