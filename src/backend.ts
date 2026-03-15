@@ -606,6 +606,8 @@ const MOOD_KEYWORDS: Record<string, string[]> = {
   joyful:      ["happy", "joy", "laugh", "celebrate", "cheer", "bright", "warm", "smile", "delight", "playful"],
   intense:     ["intense", "fierce", "rage", "fury", "storm", "roar", "crash", "fire", "burn", "blaze"],
   ethereal:    ["dream", "ethereal", "celestial", "spirit", "ghost", "divine", "heavenly", "astral", "mystic", "void"],
+  anime:       ["anime", "shonen", "shojo", "isekai", "mecha", "otaku", "opening", "ending", "japanese", "visual kei"],
+  cinematic_jp:["anime", "soundtrack", "orchestral", "japanese", "epic", "dramatic", "opening", "ending", "instrumental", "fantasy"],
 };
 
 /** Known mood/atmosphere tags on Last.fm. Used to separate mood tags from genre
@@ -632,6 +634,9 @@ const MOOD_TAG_SET = new Set([
   // Softer / lighter tones (meet-cute, comedy, warmth)
   "warm", "sweet", "cute", "lighthearted", "carefree", "innocent",
   "hopeful", "heartwarming", "cozy", "breezy",
+  // Theme/style crossover
+  "anime", "anime ost", "anisong", "j-pop", "j-rock", "visual kei",
+  "soundtrack", "score", "orchestral", "opening", "ending",
 ]);
 
 /** Maps extracted mood categories (from MOOD_KEYWORDS) to concrete Last.fm
@@ -661,7 +666,22 @@ const MOOD_TO_LASTFM_TAGS: Record<string, string[]> = {
   mellow:        ["mellow", "chill", "relaxing", "laid-back", "soothing"],
   dreamy:        ["dreamy", "ethereal", "hypnotic", "atmospheric", "psychedelic"],
   gentle:        ["gentle", "tender", "soft", "calm", "soothing", "warm"],
+  anime:         ["anime", "anime ost", "anisong", "j-pop", "j-rock", "opening", "ending", "soundtrack"],
+  shonen:        ["anime", "anisong", "j-rock", "opening", "epic", "energetic", "dramatic"],
+  shojo:         ["anime", "j-pop", "romantic", "sweet", "dreamy", "ending"],
+  ghibli:        ["anime", "soundtrack", "orchestral", "dreamy", "peaceful", "ethereal"],
+  mecha:         ["anime", "soundtrack", "electronic", "epic", "dramatic", "intense"],
+  isekai:        ["anime", "fantasy", "soundtrack", "ethereal", "adventure", "orchestral"],
+  opening:       ["opening", "anime", "j-rock", "j-pop", "energetic", "dramatic"],
+  ending:        ["ending", "anime", "j-pop", "dreamy", "melancholic", "gentle"],
+  soundtrack:    ["soundtrack", "score", "cinematic", "orchestral", "instrumental"],
 };
+
+const ANIME_THEME_TAGS = new Set([
+  "anime", "anime ost", "anisong", "j-pop", "j-rock", "visual kei",
+  "soundtrack", "score", "orchestral", "opening", "ending", "japanese",
+  "shonen", "shojo", "isekai", "mecha", "ghibli",
+]);
 
 /** Extract mood-related tags from a track/artist's Last.fm tag list. */
 function extractMoodTags(tags: { name: string; count: number }[], minCount = 5): string[] {
@@ -696,6 +716,13 @@ function overlapCount(a: Iterable<string>, b: Iterable<string>): number {
     if (bSet.has(value.toLowerCase())) count += 1;
   }
   return count;
+}
+
+function hasAnimeTheme(values: Iterable<string>): boolean {
+  for (const value of values) {
+    if (ANIME_THEME_TAGS.has(value.toLowerCase())) return true;
+  }
+  return false;
 }
 
 /** Score a context string against mood categories and return the top N mood
@@ -928,12 +955,22 @@ async function enrichCandidatesWithTagAffinity(
       ...extractMoodTags(trackTags, 0),
       ...extractMoodTags(artistTags, 0),
     ]);
+    const candidateTheme = new Set([
+      ...candidateFlavor,
+      ...candidateMood,
+      ...extractFlavorTags(trackTags, 0, 8).filter((tag) => ANIME_THEME_TAGS.has(tag.toLowerCase())),
+      ...extractFlavorTags(artistTags, 0, 8).filter((tag) => ANIME_THEME_TAGS.has(tag.toLowerCase())),
+    ]);
 
     let score = candidate.score;
     const flavorOverlap = overlapCount(seedFlavorSet, candidateFlavor);
     const moodOverlap = overlapCount(moodTagSet, candidateMood);
     score += flavorOverlap * 4;
     score += moodOverlap * 2;
+    if (hasAnimeTheme([...seedFlavorSet, ...moodTagSet])) {
+      score += overlapCount(ANIME_THEME_TAGS, candidateTheme) * 3;
+      if (!hasAnimeTheme(candidateTheme)) score -= 4;
+    }
     if (candidateFlavor.size > 0 && flavorOverlap === 0 && seedFlavorSet.size > 0) score -= 3;
 
     const source = [...candidate.source];
@@ -1237,6 +1274,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         ...extractFlavorTags(trackTags),
         ...extractFlavorTags(artistTags, 0),
       ])].slice(0, 6);
+      const wantsAnimeTheme = hasAnimeTheme([...moodTags, ...seedFlavorTags]);
       const recentKeys = new Set(recentDiscoveries.map((entry) => entry.key));
       const similarArtistSet = new Set([state.artistName, ...similarArtists].map((artist) => artist.toLowerCase()));
       const currentTrackLower = state.trackName.toLowerCase();
@@ -1297,9 +1335,14 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
           let adjustedScore = candidate.score;
           const artistLower = candidate.artist.toLowerCase();
           const key = candidateKey(candidate.name, candidate.artist);
+          const sourceText = candidate.source.join(" ").toLowerCase();
           if (artistLower === currentArtistLower) adjustedScore -= 6;
           if (similarArtistSet.has(artistLower)) adjustedScore += 4;
           else adjustedScore -= 3;
+          if (wantsAnimeTheme) {
+            if (/anime|anisong|j-pop|j-rock|opening|ending|soundtrack|orchestral|score/.test(sourceText)) adjustedScore += 5;
+            else adjustedScore -= 4;
+          }
           if (recentKeys.has(key)) adjustedScore -= 12;
           adjustedScore += Math.random() * 2;
           return { ...candidate, score: adjustedScore };
