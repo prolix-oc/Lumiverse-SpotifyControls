@@ -736,6 +736,26 @@ function timedSafe<T>(promise: Promise<T>, ms: number, label: string, fallback: 
   });
 }
 
+const activeToolInvocations = new Map<string, string>();
+
+function getToolInvocationKey(toolName: string, userId: string | null): string {
+  return `${userId || "unknown"}:${toolName}`;
+}
+
+function ensureInvocationActive(
+  invocationKey: string,
+  requestId: string,
+  deadlineMs?: number,
+  stage?: string
+): void {
+  if (activeToolInvocations.get(invocationKey) !== requestId) {
+    throw new Error(`Invocation superseded${stage ? ` during ${stage}` : ""}`);
+  }
+  if (deadlineMs && Date.now() >= deadlineMs - 150) {
+    throw new Error(`Invocation deadline reached${stage ? ` before ${stage}` : ""}`);
+  }
+}
+
 function normalizeMatchText(value: string): string {
   return value
     .toLowerCase()
@@ -817,10 +837,16 @@ async function getPlaybackSeedState(): Promise<PlaybackState | null> {
   }
 }
 
-async function playMoodFallback(query: string, state: PlaybackState, council: boolean): Promise<string> {
+async function playMoodFallback(
+  query: string,
+  state: PlaybackState,
+  council: boolean,
+  beforePlay?: (stage: string) => void
+): Promise<string> {
   const playlists = await spotify.searchPlaylists(query, 5);
   if (playlists.length > 0) {
     const best = playlists[0];
+    beforePlay?.(`fallback playlist play for \"${query}\"`);
     await spotify.play({ contextUri: best.uri });
     pushStateAfterCommand();
     const prefix = council ? `[Mood fallback "${query}"] ` : "";
@@ -829,6 +855,7 @@ async function playMoodFallback(query: string, state: PlaybackState, council: bo
 
   const tracks = await spotify.search(query);
   if (tracks.length > 0) {
+    beforePlay?.(`fallback track play for \"${query}\"`);
     await spotify.play({ trackUri: tracks[0].uri });
     pushStateAfterCommand();
     const prefix = council ? `[Mood fallback "${query}"] ` : "";
@@ -848,11 +875,17 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   // while direct LLM tool calls use bare names like "spotify_search".
   // Strip the extension prefix if present so handlers match either form.
   const rawName = payload.toolName;
+  const requestId = String(payload.requestId);
   const toolName = rawName.includes(":") ? rawName.split(":").pop()! : rawName;
   const args: Record<string, unknown> = payload.args ?? {};
   const toolUserId = typeof args.__userId === "string" ? args.__userId : null;
+  const deadlineMs = typeof args.__deadlineMs === "number" ? args.__deadlineMs : undefined;
   const council = isCouncilInvocation(args);
   const context: string = (args.context as string) || "";
+  const invocationKey = getToolInvocationKey(toolName, toolUserId || activeUserId);
+  const guard = (stage: string) => ensureInvocationActive(invocationKey, requestId, deadlineMs, stage);
+
+  activeToolInvocations.set(invocationKey, requestId);
 
   if (toolUserId) {
     await handleUserChange(toolUserId);
@@ -865,6 +898,8 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   if (!spotify.isConnected()) {
     await spotify.loadTokens();
   }
+
+  guard("startup");
 
   // ── spotify_search: search + play pipeline ──────────────────────────
   if (toolName === "spotify_search") {
@@ -881,12 +916,13 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (!query) return "No search query provided.";
       if (!mode) mode = "playlist";
 
-      if (mode === "playlist") {
-        const playlists = await spotify.searchPlaylists(query);
-        if (playlists.length > 0) {
-          const best = playlists[0];
-          await spotify.play({ contextUri: best.uri });
-          pushStateAfterCommand();
+        if (mode === "playlist") {
+          const playlists = await spotify.searchPlaylists(query);
+          if (playlists.length > 0) {
+            const best = playlists[0];
+            guard(`playlist play for \"${best.name}\"`);
+            await spotify.play({ contextUri: best.uri });
+            pushStateAfterCommand();
           const others = playlists.slice(1, 5)
             .map((p, i) => `${i + 2}. "${p.name}" by ${p.owner} (${p.trackCount} tracks)`)
             .join("\n");
@@ -897,12 +933,13 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       }
 
       // Tracks mode (or playlist fallback)
-      const results = await spotify.search(query);
-      if (results.length === 0) return `No results found for "${query}".`;
+        const results = await spotify.search(query);
+        if (results.length === 0) return `No results found for "${query}".`;
 
-      const best = results[0];
-      await spotify.play({ trackUri: best.uri });
-      pushStateAfterCommand();
+        const best = results[0];
+        guard(`track play for \"${best.name}\"`);
+        await spotify.play({ trackUri: best.uri });
+        pushStateAfterCommand();
       const others = results.slice(1, 5)
         .map((r, i) => `${i + 2}. "${r.name}" by ${r.artist} (${r.album})`)
         .join("\n");
@@ -925,12 +962,13 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       // Query Last.fm for similar tracks (autocorrect enabled, sorted by match score)
       const similar = await spotify.getSimilarTracks(state.trackName, state.artistName, 5);
 
-      if (similar.length === 0) {
-        // Fallback: search Spotify for more by this artist
-        const results = await spotify.search(state.artistName);
-        if (results.length === 0) return `No similar tracks found for "${state.trackName}" by ${state.artistName}.`;
-        await spotify.play({ trackUri: results[0].uri });
-        pushStateAfterCommand();
+        if (similar.length === 0) {
+          // Fallback: search Spotify for more by this artist
+          const results = await spotify.search(state.artistName);
+          if (results.length === 0) return `No similar tracks found for "${state.trackName}" by ${state.artistName}.`;
+          guard(`similar fallback play for \"${results[0].name}\"`);
+          await spotify.play({ trackUri: results[0].uri });
+          pushStateAfterCommand();
         return `No Last.fm similarity data — playing "${results[0].name}" by ${results[0].artist} (more by artist)`;
       }
 
@@ -939,23 +977,25 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         similar.map((c) => resolveOnSpotify(c.name, c.artist))
       )).filter((r): r is SearchResult => r !== null);
 
-      if (resolved.length === 0) return "Found similar tracks via Last.fm but could not match any on Spotify.";
+        if (resolved.length === 0) return "Found similar tracks via Last.fm but could not match any on Spotify.";
 
-      // Play the first track and queue the rest in parallel
-      await spotify.play({ trackUri: resolved[0].uri });
-      pushStateAfterCommand();
+        // Play the first track and queue the rest in parallel
+        guard(`similar result play for \"${resolved[0].name}\"`);
+        await spotify.play({ trackUri: resolved[0].uri });
+        pushStateAfterCommand();
 
       const toQueue = resolved.slice(1);
-      const queueResults = await Promise.all(
-        toQueue.map(async (track) => {
-          try {
-            await spotify.addToQueue(track.uri);
-            return `"${track.name}" by ${track.artist}`;
-          } catch {
-            return null;
-          }
-        })
-      );
+        const queueResults = await Promise.all(
+          toQueue.map(async (track) => {
+            try {
+              guard(`similar queue for \"${track.name}\"`);
+              await spotify.addToQueue(track.uri);
+              return `"${track.name}" by ${track.artist}`;
+            } catch {
+              return null;
+            }
+          })
+        );
       const queued = queueResults.filter((q): q is string => q !== null);
 
       const queueLine = queued.length > 0 ? `\n\nQueued ${queued.length} similar tracks:\n${queued.map((q, i) => `${i + 1}. ${q}`).join("\n")}` : "";
@@ -1033,7 +1073,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (moodTags.length === 0) {
         const fallbackQuery = (moodArg?.trim() || extractMoodFromContext(context) || state.artistName).trim();
         spindle.log.info(`[mood_discover] No mood tags found; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council);
+        return playMoodFallback(fallbackQuery, state, council, guard);
       }
 
       // ── Batch 2: Query tag.getTopTracks for top 2 mood tags ───────
@@ -1106,7 +1146,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         const totalResults = tagResults.reduce((n, r) => n + r.length, 0);
         const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
         spindle.log.info(`[mood_discover] ${totalResults} raw results but no ranked candidates; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council);
+        return playMoodFallback(fallbackQuery, state, council, guard);
       }
 
       spindle.log.info(`[mood_discover] Resolving ${candidates.length} candidates on Spotify`);
@@ -1122,9 +1162,10 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (resolved.length === 0) {
         const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
         spindle.log.info(`[mood_discover] No Spotify matches for Last.fm candidates; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council);
+        return playMoodFallback(fallbackQuery, state, council, guard);
       }
 
+      guard(`mood result play for \"${resolved[0].name}\"`);
       await timed(spotify.play({ trackUri: resolved[0].uri }), WRITE_TIMEOUT, "spotify.play");
       pushStateAfterCommand();
 
@@ -1133,9 +1174,10 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       const toQueue = resolved.slice(1, 4);
       if (toQueue.length > 0) {
         void Promise.allSettled(
-          toQueue.map((track) =>
-            timed(spotify.addToQueue(track.uri), WRITE_TIMEOUT, `spotify.queue("${track.name}")`)
-          )
+          toQueue.map(async (track) => {
+            guard(`mood queue for \"${track.name}\"`);
+            return timed(spotify.addToQueue(track.uri), WRITE_TIMEOUT, `spotify.queue("${track.name}")`);
+          })
         ).then((results) => {
           results.forEach((result, index) => {
             if (result.status === "rejected") {
