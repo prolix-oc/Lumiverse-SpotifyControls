@@ -765,13 +765,6 @@ function timedSafe<T>(promise: Promise<T>, ms: number, label: string, fallback: 
 }
 
 const activeToolInvocations = new Map<string, string>();
-const activeCouncilToolRuns = new Map<string, { requestId: string; startedAt: number }>();
-const councilPlaybackSessions = new Map<string, {
-  startedAt: number;
-  seedState: PlaybackState | null;
-  actionRequestId: string | null;
-}>();
-const COUNCIL_PLAYBACK_SESSION_MS = 20_000;
 const RECENT_DISCOVERY_FILE = "recent_mood_discover.json";
 const RECENT_DISCOVERY_LIMIT = 20;
 const RECENT_DISCOVERY_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
@@ -863,37 +856,6 @@ async function rememberMoodDiscoveries(results: SearchResult[]): Promise<void> {
     if (!deduped.has(entry.key)) deduped.set(entry.key, entry);
   }
   await saveRecentMoodDiscoveries(Array.from(deduped.values()));
-}
-
-async function getCouncilPlaybackSession(userId: string, requestId: string): Promise<{
-  startedAt: number;
-  seedState: PlaybackState | null;
-  actionRequestId: string | null;
-}> {
-  const existing = councilPlaybackSessions.get(userId);
-  if (existing && Date.now() - existing.startedAt < COUNCIL_PLAYBACK_SESSION_MS) {
-    return existing;
-  }
-
-  const session = {
-    startedAt: Date.now(),
-    seedState: await getPlaybackSeedState(),
-    actionRequestId: null,
-  };
-  councilPlaybackSessions.set(userId, session);
-  spindle.log.info(
-    `[council_spotify] Snapshot for ${userId}: ${session.seedState ? `"${session.seedState.trackName}" by ${session.seedState.artistName}` : "no active playback"} (request ${requestId})`
-  );
-  return session;
-}
-
-function claimCouncilPlaybackAction(userId: string, requestId: string, action: string): void {
-  const session = councilPlaybackSessions.get(userId);
-  if (!session) return;
-  if (session.actionRequestId && session.actionRequestId !== requestId) {
-    throw new Error(`Skipped ${action}: another Spotify council tool already changed playback this turn`);
-  }
-  session.actionRequestId = requestId;
 }
 
 function normalizeMatchText(value: string): string {
@@ -1085,33 +1047,16 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
 
   guard("startup");
 
-  const councilSession = council && resolvedToolUserId
-    ? await getCouncilPlaybackSession(resolvedToolUserId, requestId)
-    : null;
-  const councilToolRunKey = council && resolvedToolUserId
-    ? `${resolvedToolUserId}:${toolName}`
-    : null;
-
-  if (councilToolRunKey) {
-    const existingRun = activeCouncilToolRuns.get(councilToolRunKey);
-    if (existingRun && existingRun.requestId !== requestId && Date.now() - existingRun.startedAt < COUNCIL_PLAYBACK_SESSION_MS) {
-      const seed = councilSession?.seedState;
-      return `Skipped duplicate ${toolName} invocation while a prior run is still resolving${seed ? ` (seed: "${seed.trackName}" by ${seed.artistName})` : ""}.`;
-    }
-    activeCouncilToolRuns.set(councilToolRunKey, { requestId, startedAt: Date.now() });
+  const councilSeedState = council ? await getPlaybackSeedState() : null;
+  if (council && councilSeedState) {
+    spindle.log.info(
+      `[council_spotify] Seed for ${toolName}: "${councilSeedState.trackName}" by ${councilSeedState.artistName} (request ${requestId})`
+    );
   }
 
   try {
-    if (councilSession?.actionRequestId && councilSession.actionRequestId !== requestId) {
-      const seed = councilSession.seedState;
-      return `Skipped ${toolName}: another Spotify council tool already acted this turn${seed ? ` (seed was "${seed.trackName}" by ${seed.artistName})` : ""}.`;
-    }
-
     const guardPlaybackMutation = (stage: string) => {
       guard(stage);
-      if (council && resolvedToolUserId) {
-        claimCouncilPlaybackAction(resolvedToolUserId, requestId, stage);
-      }
     };
 
   // ── spotify_search: search + play pipeline ──────────────────────────
@@ -1169,7 +1114,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       // Get the currently playing track — this is the sole seed for similarity.
       // Council runs use a frozen snapshot so later Spotify tools cannot reseed
       // themselves from playback changed earlier in the same turn.
-      const state = councilSession?.seedState || await getPlaybackSeedState();
+      const state = councilSeedState || await getPlaybackSeedState();
       if (!state?.trackName || !state?.artistName) {
         return "Nothing is currently playing. Play something first so we can find similar tracks.";
       }
@@ -1229,7 +1174,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
     const READ_TIMEOUT = 6000;
     const WRITE_TIMEOUT = 8000;
     try {
-      const state = councilSession?.seedState || await getPlaybackSeedState();
+      const state = councilSeedState || await getPlaybackSeedState();
       if (!state?.trackName || !state?.artistName) {
         return "Nothing is currently playing. Play something first so we can discover mood-matching music.";
       }
@@ -1462,12 +1407,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
     }
   }
   } finally {
-    if (councilToolRunKey) {
-      const existingRun = activeCouncilToolRuns.get(councilToolRunKey);
-      if (existingRun?.requestId === requestId) {
-        activeCouncilToolRuns.delete(councilToolRunKey);
-      }
-    }
+    // No-op: stale invocations are handled by activeToolInvocations guards.
   }
 });
 
