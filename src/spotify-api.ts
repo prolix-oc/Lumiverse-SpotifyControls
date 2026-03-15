@@ -148,16 +148,19 @@ async function spotifyFetch(
 
 // ─── Playback ────────────────────────────────────────────────────────────
 
-export async function getCurrentPlayback(): Promise<PlaybackState | null> {
-  const res = await spotifyFetch("/me/player");
+export async function getCurrentlyPlaying(): Promise<PlaybackState | null> {
+  const res = await spotifyFetch("/me/player/currently-playing");
   if (res.status === 204 || !res.body || res.body.trim() === "") return null;
   if (res.status !== 200) return null;
 
   return parsePlaybackState(JSON.parse(res.body));
 }
 
-export async function getCurrentlyPlaying(): Promise<PlaybackState | null> {
-  const res = await spotifyFetch("/me/player/currently-playing");
+export async function getCurrentPlayback(): Promise<PlaybackState | null> {
+  const currentlyPlaying = await getCurrentlyPlaying();
+  if (currentlyPlaying) return currentlyPlaying;
+
+  const res = await spotifyFetch("/me/player");
   if (res.status === 204 || !res.body || res.body.trim() === "") return null;
   if (res.status !== 200) return null;
 

@@ -807,11 +807,6 @@ async function getPlaybackSeedState(): Promise<PlaybackState | null> {
       await cacheState(current);
       return current;
     }
-    const currentlyPlaying = await spotify.getCurrentlyPlaying();
-    if (currentlyPlaying) {
-      await cacheState(currentlyPlaying);
-      return currentlyPlaying;
-    }
     return null;
   } catch {
     if (lastState && Date.now() - lastStateUpdatedAt < 60_000) {
