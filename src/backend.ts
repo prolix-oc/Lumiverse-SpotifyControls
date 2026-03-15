@@ -737,6 +737,13 @@ function timedSafe<T>(promise: Promise<T>, ms: number, label: string, fallback: 
 }
 
 const activeToolInvocations = new Map<string, string>();
+const activeCouncilToolRuns = new Map<string, { requestId: string; startedAt: number }>();
+const councilPlaybackSessions = new Map<string, {
+  startedAt: number;
+  seedState: PlaybackState | null;
+  actionRequestId: string | null;
+}>();
+const COUNCIL_PLAYBACK_SESSION_MS = 20_000;
 
 function getToolInvocationKey(toolName: string, userId: string | null): string {
   return `${userId || "unknown"}:${toolName}`;
@@ -754,6 +761,37 @@ function ensureInvocationActive(
   if (deadlineMs && Date.now() >= deadlineMs - 150) {
     throw new Error(`Invocation deadline reached${stage ? ` before ${stage}` : ""}`);
   }
+}
+
+async function getCouncilPlaybackSession(userId: string, requestId: string): Promise<{
+  startedAt: number;
+  seedState: PlaybackState | null;
+  actionRequestId: string | null;
+}> {
+  const existing = councilPlaybackSessions.get(userId);
+  if (existing && Date.now() - existing.startedAt < COUNCIL_PLAYBACK_SESSION_MS) {
+    return existing;
+  }
+
+  const session = {
+    startedAt: Date.now(),
+    seedState: await getPlaybackSeedState(),
+    actionRequestId: null,
+  };
+  councilPlaybackSessions.set(userId, session);
+  spindle.log.info(
+    `[council_spotify] Snapshot for ${userId}: ${session.seedState ? `"${session.seedState.trackName}" by ${session.seedState.artistName}` : "no active playback"} (request ${requestId})`
+  );
+  return session;
+}
+
+function claimCouncilPlaybackAction(userId: string, requestId: string, action: string): void {
+  const session = councilPlaybackSessions.get(userId);
+  if (!session) return;
+  if (session.actionRequestId && session.actionRequestId !== requestId) {
+    throw new Error(`Skipped ${action}: another Spotify council tool already changed playback this turn`);
+  }
+  session.actionRequestId = requestId;
 }
 
 function normalizeMatchText(value: string): string {
@@ -882,7 +920,8 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   const deadlineMs = typeof args.__deadlineMs === "number" ? args.__deadlineMs : undefined;
   const council = isCouncilInvocation(args);
   const context: string = (args.context as string) || "";
-  const invocationKey = getToolInvocationKey(toolName, toolUserId || activeUserId);
+  const resolvedToolUserId = toolUserId || activeUserId;
+  const invocationKey = getToolInvocationKey(toolName, resolvedToolUserId);
   const guard = (stage: string) => ensureInvocationActive(invocationKey, requestId, deadlineMs, stage);
 
   activeToolInvocations.set(invocationKey, requestId);
@@ -900,6 +939,35 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   }
 
   guard("startup");
+
+  const councilSession = council && resolvedToolUserId
+    ? await getCouncilPlaybackSession(resolvedToolUserId, requestId)
+    : null;
+  const councilToolRunKey = council && resolvedToolUserId
+    ? `${resolvedToolUserId}:${toolName}`
+    : null;
+
+  if (councilToolRunKey) {
+    const existingRun = activeCouncilToolRuns.get(councilToolRunKey);
+    if (existingRun && existingRun.requestId !== requestId && Date.now() - existingRun.startedAt < COUNCIL_PLAYBACK_SESSION_MS) {
+      const seed = councilSession?.seedState;
+      return `Skipped duplicate ${toolName} invocation while a prior run is still resolving${seed ? ` (seed: "${seed.trackName}" by ${seed.artistName})` : ""}.`;
+    }
+    activeCouncilToolRuns.set(councilToolRunKey, { requestId, startedAt: Date.now() });
+  }
+
+  try {
+    if (councilSession?.actionRequestId && councilSession.actionRequestId !== requestId) {
+      const seed = councilSession.seedState;
+      return `Skipped ${toolName}: another Spotify council tool already acted this turn${seed ? ` (seed was "${seed.trackName}" by ${seed.artistName})` : ""}.`;
+    }
+
+    const guardPlaybackMutation = (stage: string) => {
+      guard(stage);
+      if (council && resolvedToolUserId) {
+        claimCouncilPlaybackAction(resolvedToolUserId, requestId, stage);
+      }
+    };
 
   // ── spotify_search: search + play pipeline ──────────────────────────
   if (toolName === "spotify_search") {
@@ -920,7 +988,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
           const playlists = await spotify.searchPlaylists(query);
           if (playlists.length > 0) {
             const best = playlists[0];
-            guard(`playlist play for \"${best.name}\"`);
+            guardPlaybackMutation(`playlist play for \"${best.name}\"`);
             await spotify.play({ contextUri: best.uri });
             pushStateAfterCommand();
           const others = playlists.slice(1, 5)
@@ -937,7 +1005,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         if (results.length === 0) return `No results found for "${query}".`;
 
         const best = results[0];
-        guard(`track play for \"${best.name}\"`);
+        guardPlaybackMutation(`track play for \"${best.name}\"`);
         await spotify.play({ trackUri: best.uri });
         pushStateAfterCommand();
       const others = results.slice(1, 5)
@@ -953,8 +1021,10 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   // ── spotify_search_similar: similar music discovery + play ───────────
   if (toolName === "spotify_search_similar") {
     try {
-      // Get the currently playing track — this is the sole seed for similarity
-      const state = lastState || await spotify.getCurrentPlayback();
+      // Get the currently playing track — this is the sole seed for similarity.
+      // Council runs use a frozen snapshot so later Spotify tools cannot reseed
+      // themselves from playback changed earlier in the same turn.
+      const state = councilSession?.seedState || await getPlaybackSeedState();
       if (!state?.trackName || !state?.artistName) {
         return "Nothing is currently playing. Play something first so we can find similar tracks.";
       }
@@ -966,7 +1036,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
           // Fallback: search Spotify for more by this artist
           const results = await spotify.search(state.artistName);
           if (results.length === 0) return `No similar tracks found for "${state.trackName}" by ${state.artistName}.`;
-          guard(`similar fallback play for \"${results[0].name}\"`);
+          guardPlaybackMutation(`similar fallback play for \"${results[0].name}\"`);
           await spotify.play({ trackUri: results[0].uri });
           pushStateAfterCommand();
         return `No Last.fm similarity data — playing "${results[0].name}" by ${results[0].artist} (more by artist)`;
@@ -980,7 +1050,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         if (resolved.length === 0) return "Found similar tracks via Last.fm but could not match any on Spotify.";
 
         // Play the first track and queue the rest in parallel
-        guard(`similar result play for \"${resolved[0].name}\"`);
+        guardPlaybackMutation(`similar result play for \"${resolved[0].name}\"`);
         await spotify.play({ trackUri: resolved[0].uri });
         pushStateAfterCommand();
 
@@ -988,7 +1058,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         const queueResults = await Promise.all(
           toQueue.map(async (track) => {
             try {
-              guard(`similar queue for \"${track.name}\"`);
+              guardPlaybackMutation(`similar queue for \"${track.name}\"`);
               await spotify.addToQueue(track.uri);
               return `"${track.name}" by ${track.artist}`;
             } catch {
@@ -1014,7 +1084,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
     const READ_TIMEOUT = 6000;
     const WRITE_TIMEOUT = 8000;
     try {
-      const state = await getPlaybackSeedState();
+      const state = councilSession?.seedState || await getPlaybackSeedState();
       if (!state?.trackName || !state?.artistName) {
         return "Nothing is currently playing. Play something first so we can discover mood-matching music.";
       }
@@ -1073,7 +1143,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (moodTags.length === 0) {
         const fallbackQuery = (moodArg?.trim() || extractMoodFromContext(context) || state.artistName).trim();
         spindle.log.info(`[mood_discover] No mood tags found; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council, guard);
+        return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
       }
 
       // ── Batch 2: Query tag.getTopTracks for top 2 mood tags ───────
@@ -1146,7 +1216,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         const totalResults = tagResults.reduce((n, r) => n + r.length, 0);
         const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
         spindle.log.info(`[mood_discover] ${totalResults} raw results but no ranked candidates; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council, guard);
+        return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
       }
 
       spindle.log.info(`[mood_discover] Resolving ${candidates.length} candidates on Spotify`);
@@ -1162,10 +1232,10 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (resolved.length === 0) {
         const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
         spindle.log.info(`[mood_discover] No Spotify matches for Last.fm candidates; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council, guard);
+        return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
       }
 
-      guard(`mood result play for \"${resolved[0].name}\"`);
+      guardPlaybackMutation(`mood result play for \"${resolved[0].name}\"`);
       await timed(spotify.play({ trackUri: resolved[0].uri }), WRITE_TIMEOUT, "spotify.play");
       pushStateAfterCommand();
 
@@ -1175,7 +1245,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (toQueue.length > 0) {
         void Promise.allSettled(
           toQueue.map(async (track) => {
-            guard(`mood queue for \"${track.name}\"`);
+            guardPlaybackMutation(`mood queue for \"${track.name}\"`);
             return timed(spotify.addToQueue(track.uri), WRITE_TIMEOUT, `spotify.queue("${track.name}")`);
           })
         ).then((results) => {
@@ -1210,10 +1280,19 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (!uri && council) {
         return "Cannot queue a track without a URI. Use spotify_search to discover tracks first.";
       }
+      guardPlaybackMutation(`queue for \"${uri || "unknown track"}\"`);
       await spotify.addToQueue(uri || "");
       return "Track added to queue.";
     } catch (err: any) {
       return `Failed to queue track: ${err?.message}`;
+    }
+  }
+  } finally {
+    if (councilToolRunKey) {
+      const existingRun = activeCouncilToolRuns.get(councilToolRunKey);
+      if (existingRun?.requestId === requestId) {
+        activeCouncilToolRuns.delete(councilToolRunKey);
+      }
     }
   }
 });
