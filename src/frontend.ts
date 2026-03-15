@@ -51,11 +51,11 @@ export function setup(ctx: SpindleFrontendContext) {
   }
 
   // Server base URL helper — Spotify rejects "localhost" in redirect URIs;
-  // use the IPv6 loopback [::1] instead for local development.
+  // use the IPv4 loopback 127.0.0.1 instead for local development.
   function getServerBaseUrl(): string {
     const origin = window.location.origin;
     if (new URL(origin).hostname === "localhost") {
-      return origin.replace("://localhost", "://[::1]");
+      return origin.replace("://localhost", "://127.0.0.1");
     }
     return origin;
   }
