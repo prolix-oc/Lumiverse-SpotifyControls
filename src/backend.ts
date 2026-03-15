@@ -110,17 +110,21 @@ async function handleUserChange(userId: string): Promise<void> {
 import type { PlaybackState } from "./types";
 
 let lastState: PlaybackState | null = null;
+let lastStateUpdatedAt = 0;
 
 async function loadCachedState(): Promise<void> {
   try {
     lastState = await spindle.storage.getJson<PlaybackState>("last_state.json");
+    lastStateUpdatedAt = 0;
   } catch {
     lastState = null;
+    lastStateUpdatedAt = 0;
   }
 }
 
 async function cacheState(state: PlaybackState | null): Promise<void> {
   lastState = state;
+  lastStateUpdatedAt = state ? Date.now() : 0;
   if (state) {
     await spindle.storage.setJson("last_state.json", state).catch(() => {});
   }
@@ -792,7 +796,19 @@ async function resolveOnSpotify(trackName: string, artist: string): Promise<Sear
 }
 
 async function getPlaybackSeedState(): Promise<PlaybackState | null> {
-  return lastState || await spotify.getCurrentPlayback();
+  try {
+    const current = await spotify.getCurrentPlayback();
+    if (current) {
+      await cacheState(current);
+      return current;
+    }
+    return null;
+  } catch {
+    if (lastState && Date.now() - lastStateUpdatedAt < 60_000) {
+      return lastState;
+    }
+    return null;
+  }
 }
 
 async function playMoodFallback(query: string, state: PlaybackState, council: boolean): Promise<string> {
