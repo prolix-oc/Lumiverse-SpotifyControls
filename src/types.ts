@@ -19,7 +19,8 @@ export type FrontendToBackend =
   | { type: "transfer_playback"; deviceId: string }
   | { type: "save_lastfm_key"; apiKey: string }
   | { type: "get_widget_prefs" }
-  | { type: "save_widget_prefs"; prefs: WidgetPrefs };
+  | { type: "save_widget_prefs"; prefs: WidgetPrefs }
+  | { type: "get_lyrics" };
 
 // ─── Backend → Frontend messages ─────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export type BackendToFrontend =
   | { type: "disconnected" }
   | { type: "devices"; devices: DeviceInfo[] }
   | { type: "widget_prefs"; prefs: WidgetPrefs }
+  | { type: "lyrics"; trackUri: string; lyrics: string | null; instrumental: boolean }
   | { type: "error"; message: string };
 
 // ─── Shared interfaces ──────────────────────────────────────────────────
@@ -83,6 +85,8 @@ export interface WidgetPrefs {
   size: number;
   shape: "circle" | "squircle";
   sizeMode: "small" | "medium" | "large" | "custom";
+  x?: number;
+  y?: number;
 }
 
 export interface SpotifyConfig {

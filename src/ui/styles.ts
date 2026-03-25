@@ -815,62 +815,39 @@ export const PANEL_CSS = `
   flex-shrink: 0;
 }
 
-/* Context menu */
-.spotify-context-menu {
-  position: fixed;
-  z-index: 9999;
-  min-width: 160px;
-  background: var(--lumiverse-bg);
-  border: 1px solid var(--lumiverse-border);
-  border-radius: 8px;
-  box-shadow: var(--lumiverse-shadow-xl);
-  padding: 4px;
-  font-family: system-ui, -apple-system, sans-serif;
-  color: var(--lumiverse-text);
-  visibility: hidden;
-  opacity: 0;
-  transform: scale(0.95);
-  pointer-events: none;
-  transition: opacity 120ms ease, transform 120ms ease, visibility 0s 120ms;
+/* Lyrics */
+.spotify-lyrics-section {
+  min-height: 0;
+  flex: 1;
 }
 
-.spotify-context-menu.visible {
-  visibility: visible;
-  opacity: 1;
-  transform: scale(1);
-  pointer-events: auto;
-  transition: opacity 120ms ease, transform 120ms ease, visibility 0s 0s;
+.spotify-lyrics-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 48px;
 }
 
-.spotify-context-label {
-  padding: 4px 10px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--lumiverse-text-dim);
+.spotify-lyrics-has-content {
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lumiverse-fill-strong) transparent;
 }
 
-.spotify-context-item {
-  padding: 6px 10px;
+.spotify-lyrics-status {
+  padding: 12px 0;
+  text-align: center;
   font-size: 12px;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background 0.1s ease;
+  color: var(--lumiverse-text-dim);
+  font-style: italic;
 }
 
-.spotify-context-item:hover {
-  background: var(--lumiverse-fill-subtle);
+.spotify-lyrics-text {
+  white-space: pre-wrap;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--lumiverse-text-muted);
+  padding: 4px 0;
 }
 
-.spotify-context-item.active {
-  color: #1db954;
-  font-weight: 500;
-}
-
-.spotify-context-divider {
-  height: 1px;
-  background: var(--lumiverse-border);
-  margin: 4px 8px;
-}
 `;

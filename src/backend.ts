@@ -431,6 +431,17 @@ spindle.onFrontendMessage(async (raw, userId) => {
         await spindle.userStorage.setJson("widget_prefs.json", msg.prefs, { userId });
         break;
       }
+
+      case "get_lyrics": {
+        const lyrics = await getLyricsForCurrentTrack();
+        send({
+          type: "lyrics",
+          trackUri: lastState?.trackUri || "",
+          lyrics: lyrics?.plainLyrics || null,
+          instrumental: !!lyrics?.instrumental,
+        });
+        break;
+      }
     }
   } catch (err: any) {
     send({ type: "error", message: err?.message || "Unknown error" });

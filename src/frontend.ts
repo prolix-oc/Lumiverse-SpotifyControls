@@ -7,6 +7,7 @@ import { createControlsUI } from "./ui/controls";
 import { createSearchUI } from "./ui/search";
 import { createMiniPlayerUI } from "./ui/mini-player";
 import { createCrossfadeArt } from "./ui/crossfade-art";
+import { createLyricsUI } from "./ui/lyrics";
 import { createPermissionModal, PERMISSION_MODAL_CSS } from "./ui/permission-modal";
 
 const SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
@@ -31,6 +32,8 @@ export function setup(ctx: SpindleFrontendContext) {
   let currentWidgetSize = 48;
   let currentArtShape: ArtShape = "circle";
   let currentSizeMode: SizeMode = "medium";
+  let savedX: number | undefined;
+  let savedY: number | undefined;
   try {
     const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
     if (typeof saved.size === "number" && saved.size >= 24 && saved.size <= 128) currentWidgetSize = saved.size;
@@ -43,11 +46,20 @@ export function setup(ctx: SpindleFrontendContext) {
       else if (currentWidgetSize === 64) currentSizeMode = "large";
       else if (currentWidgetSize !== 48) currentSizeMode = "custom";
     }
+    if (typeof saved.x === "number") savedX = saved.x;
+    if (typeof saved.y === "number") savedY = saved.y;
   } catch {}
   function saveWidgetPrefs() {
-    const prefs: WidgetPrefs = { size: currentWidgetSize, shape: currentArtShape, sizeMode: currentSizeMode };
+    const pos = widget.getPosition();
+    const prefs: WidgetPrefs = { size: currentWidgetSize, shape: currentArtShape, sizeMode: currentSizeMode, x: pos.x, y: pos.y };
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     sendToBackend({ type: "save_widget_prefs", prefs });
+  }
+
+  let savePositionTimer: ReturnType<typeof setTimeout> | null = null;
+  function debounceSavePosition() {
+    if (savePositionTimer) clearTimeout(savePositionTimer);
+    savePositionTimer = setTimeout(saveWidgetPrefs, 500);
   }
 
   // Server base URL helper — Spotify rejects "localhost" in redirect URIs;
@@ -132,16 +144,21 @@ export function setup(ctx: SpindleFrontendContext) {
   });
   const controlsUI = createControlsUI(sendToBackend);
   const searchUI = createSearchUI(sendToBackend);
+  const lyricsUI = createLyricsUI();
 
   panel.appendChild(nowPlayingUI.root);
   panel.appendChild(controlsUI.root);
   panel.appendChild(searchUI.root);
+  panel.appendChild(lyricsUI.root);
 
   cleanups.push(
     () => nowPlayingUI.destroy(),
     () => controlsUI.destroy(),
-    () => searchUI.destroy()
+    () => searchUI.destroy(),
+    () => lyricsUI.destroy()
   );
+
+  let lastLyricsTrackUri: string | null = null;
 
   // ─── Float Widget + Mini Player ──────────────────────────────────────
 
@@ -183,6 +200,10 @@ export function setup(ctx: SpindleFrontendContext) {
     }
   }
   applyWidgetStyle();
+  widget.onDragEnd(() => debounceSavePosition());
+  if (savedX !== undefined && savedY !== undefined) {
+    widget.moveTo(savedX, savedY);
+  }
 
   function clampWidgetPosition() {
     const pos = widget.getPosition();
@@ -262,87 +283,65 @@ export function setup(ctx: SpindleFrontendContext) {
     miniPlayer.toggle();
   });
 
-  // ─── Context Menu ────────────────────────────────────────────────────────
+  // ─── Context Menu (via Spindle API — themed, works on mobile via long-press) ─
 
-  const contextMenu = document.createElement("div");
-  contextMenu.className = "spotify-context-menu";
-  document.body.appendChild(contextMenu);
-  cleanups.push(() => contextMenu.remove());
-
-  function hideContextMenu() {
-    contextMenu.classList.remove("visible");
-  }
-
-  function showContextMenu(x: number, y: number) {
-    contextMenu.innerHTML = "";
-
-    const sizeLabel = document.createElement("div");
-    sizeLabel.className = "spotify-context-label";
-    sizeLabel.textContent = "Widget Size";
-    contextMenu.appendChild(sizeLabel);
-
-    const sizes: [string, Exclude<SizeMode, "custom">][] = [["Small", "small"], ["Medium", "medium"], ["Large", "large"]];
-    for (const [label, mode] of sizes) {
-      const item = document.createElement("div");
-      item.className = "spotify-context-item";
-      if (currentSizeMode === mode) item.classList.add("active");
-      item.textContent = label;
-      item.addEventListener("click", () => {
-        currentSizeMode = mode;
-        recreateWidget(SIZE_PRESETS[mode]);
-        hideContextMenu();
-      });
-      contextMenu.appendChild(item);
-    }
-
-    const customItem = document.createElement("div");
-    customItem.className = "spotify-context-item";
-    if (currentSizeMode === "custom") customItem.classList.add("active");
-    customItem.textContent = "Custom…";
-    customItem.addEventListener("click", () => {
-      hideContextMenu();
-      ctx.events.emit("open-settings", { view: "extensions" });
+  async function showContextMenu(x: number, y: number) {
+    const { selectedKey } = await ctx.ui.showContextMenu({
+      position: { x, y },
+      items: [
+        { key: "small", label: "Small", active: currentSizeMode === "small" },
+        { key: "medium", label: "Medium", active: currentSizeMode === "medium" },
+        { key: "large", label: "Large", active: currentSizeMode === "large" },
+        { key: "custom", label: "Custom…", active: currentSizeMode === "custom" },
+        { key: "div", label: "", type: "divider" },
+        { key: "circle", label: "Circle", active: currentArtShape === "circle" },
+        { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" },
+      ],
     });
-    contextMenu.appendChild(customItem);
 
-    const divider = document.createElement("div");
-    divider.className = "spotify-context-divider";
-    contextMenu.appendChild(divider);
+    if (!selectedKey) return;
 
-    const shapeLabel = document.createElement("div");
-    shapeLabel.className = "spotify-context-label";
-    shapeLabel.textContent = "Art Shape";
-    contextMenu.appendChild(shapeLabel);
-
-    const shapes: [string, ArtShape][] = [["Circle", "circle"], ["Squircle", "squircle"]];
-    for (const [label, shape] of shapes) {
-      const item = document.createElement("div");
-      item.className = "spotify-context-item";
-      if (currentArtShape === shape) item.classList.add("active");
-      item.textContent = label;
-      item.addEventListener("click", () => {
-        currentArtShape = shape;
-        saveWidgetPrefs();
-        applyWidgetStyle();
-        hideContextMenu();
-      });
-      contextMenu.appendChild(item);
+    if (selectedKey === "small" || selectedKey === "medium" || selectedKey === "large") {
+      currentSizeMode = selectedKey;
+      recreateWidget(SIZE_PRESETS[selectedKey]);
+    } else if (selectedKey === "custom") {
+      ctx.events.emit("open-settings", { view: "extensions" });
+    } else if (selectedKey === "circle" || selectedKey === "squircle") {
+      currentArtShape = selectedKey;
+      saveWidgetPrefs();
+      applyWidgetStyle();
     }
-
-    contextMenu.style.left = `${x}px`;
-    contextMenu.style.top = `${y}px`;
-    contextMenu.classList.add("visible");
-
-    const rect = contextMenu.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-      contextMenu.style.left = `${window.innerWidth - rect.width - 8}px`;
-    }
-    if (rect.bottom > window.innerHeight) {
-      contextMenu.style.top = `${window.innerHeight - rect.height - 8}px`;
-    }
-
-    setTimeout(() => document.addEventListener("click", hideContextMenu, { once: true }), 0);
   }
+
+  // Long-press detection for mobile
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+  let longPressFired = false;
+  let longPressStart = { x: 0, y: 0 };
+
+  widgetContent.addEventListener("touchstart", (e) => {
+    longPressFired = false;
+    const touch = e.touches[0];
+    longPressStart = { x: touch.clientX, y: touch.clientY };
+    longPressTimer = setTimeout(() => {
+      longPressFired = true;
+      navigator.vibrate?.(50);
+      showContextMenu(touch.clientX, touch.clientY);
+    }, 500);
+  }, { passive: true });
+
+  widgetContent.addEventListener("touchmove", (e) => {
+    if (!longPressTimer) return;
+    const touch = e.touches[0];
+    if (Math.abs(touch.clientX - longPressStart.x) > 10 || Math.abs(touch.clientY - longPressStart.y) > 10) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }, { passive: true });
+
+  widgetContent.addEventListener("touchend", (e) => {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    if (longPressFired) { e.preventDefault(); longPressFired = false; }
+  });
 
   function recreateWidget(newSize: number) {
     miniPlayer.hide();
@@ -362,6 +361,7 @@ export function setup(ctx: SpindleFrontendContext) {
     applyWidgetStyle();
     widget.root.appendChild(widgetContent);
     widget.moveTo(pos.x, pos.y);
+    widget.onDragEnd(() => debounceSavePosition());
     clampWidgetPosition();
   }
 
@@ -424,7 +424,7 @@ export function setup(ctx: SpindleFrontendContext) {
     const msg = raw as BackendToFrontend;
 
     switch (msg.type) {
-      case "state":
+      case "state": {
         currentState = msg.playbackState;
         connected = msg.connected;
         nowPlayingUI.update(currentState, connected);
@@ -432,7 +432,18 @@ export function setup(ctx: SpindleFrontendContext) {
         miniPlayer.update(currentState, connected);
         updateWidget(currentState);
         scheduleTrackEndRefresh(currentState);
+        // Fetch lyrics when track changes
+        const trackUri = currentState?.trackUri || null;
+        if (trackUri && trackUri !== lastLyricsTrackUri) {
+          lastLyricsTrackUri = trackUri;
+          lyricsUI.setLoading(true);
+          sendToBackend({ type: "get_lyrics" });
+        } else if (!trackUri && lastLyricsTrackUri) {
+          lastLyricsTrackUri = null;
+          lyricsUI.clear();
+        }
         break;
+      }
 
       case "config":
         settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey, msg.callbackUrl);
@@ -465,6 +476,16 @@ export function setup(ctx: SpindleFrontendContext) {
           // expected size even when stored values already agree.
           applyWidgetStyle();
         }
+        // Restore saved position from backend (only on initial load — don't
+        // override a position the user just dragged to)
+        if (typeof p.x === "number" && typeof p.y === "number") {
+          const cur = widget.getPosition();
+          // Only apply if widget is still at its default position
+          if (savedX === undefined && savedY === undefined && (cur.x !== p.x || cur.y !== p.y)) {
+            widget.moveTo(p.x, p.y);
+            clampWidgetPosition();
+          }
+        }
         break;
       }
 
@@ -495,6 +516,10 @@ export function setup(ctx: SpindleFrontendContext) {
         controlsUI.update(null, false);
         miniPlayer.update(null, false);
         updateWidget(null);
+        break;
+
+      case "lyrics":
+        lyricsUI.update(msg.trackUri, msg.lyrics, msg.instrumental);
         break;
 
       case "error":
