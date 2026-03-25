@@ -233,6 +233,10 @@ export function setup(ctx: SpindleFrontendContext) {
   );
   cleanups.push(() => miniPlayer.destroy());
 
+  // Sync volume between drawer controls and mini player
+  controlsUI.onVolumeChange((pct) => miniPlayer.setVolume(pct));
+  miniPlayer.onVolumeChange((pct) => controlsUI.setVolume(pct));
+
   // Track drag state so we don't open the mini player when releasing a drag
   let didDrag = false;
   let pointerStartPos = { x: 0, y: 0 };

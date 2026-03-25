@@ -13,6 +13,8 @@ const ICON_VOLUME = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.
 export interface ControlsUI {
   root: HTMLElement;
   update(state: PlaybackState | null, connected: boolean): void;
+  setVolume(percent: number): void;
+  onVolumeChange(handler: (percent: number) => void): void;
   destroy(): void;
 }
 
@@ -91,10 +93,13 @@ export function createControlsUI(
   });
 
   let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
+  const volumeChangeHandlers = new Set<(percent: number) => void>();
   volumeSlider.addEventListener("input", () => {
+    const percent = parseInt(volumeSlider.value, 10);
+    for (const h of volumeChangeHandlers) h(percent);
     if (volumeDebounce) clearTimeout(volumeDebounce);
     volumeDebounce = setTimeout(() => {
-      sendToBackend({ type: "set_volume", percent: parseInt(volumeSlider.value, 10) });
+      sendToBackend({ type: "set_volume", percent });
     }, 200);
   });
 
@@ -131,8 +136,15 @@ export function createControlsUI(
   return {
     root,
     update,
+    setVolume(percent: number) {
+      volumeSlider.value = String(percent);
+    },
+    onVolumeChange(handler: (percent: number) => void) {
+      volumeChangeHandlers.add(handler);
+    },
     destroy() {
       if (volumeDebounce) clearTimeout(volumeDebounce);
+      volumeChangeHandlers.clear();
       root.remove();
     },
   };

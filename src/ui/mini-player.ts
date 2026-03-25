@@ -21,6 +21,8 @@ export interface MiniPlayerUI {
   root: HTMLElement;
   update(state: PlaybackState | null, connected: boolean): void;
   setDevices(devices: DeviceInfo[]): void;
+  setVolume(percent: number): void;
+  onVolumeChange(handler: (percent: number) => void): void;
   toggle(): void;
   hide(): void;
   isOpen(): boolean;
@@ -238,11 +240,14 @@ export function createMiniPlayerUI(
   });
 
   let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
+  const volumeChangeHandlers = new Set<(percent: number) => void>();
   volumeSlider.addEventListener("input", (e) => {
     e.stopPropagation();
+    const percent = parseInt(volumeSlider.value, 10);
+    for (const h of volumeChangeHandlers) h(percent);
     if (volumeDebounce) clearTimeout(volumeDebounce);
     volumeDebounce = setTimeout(() => {
-      sendToBackend({ type: "set_volume", percent: parseInt(volumeSlider.value, 10) });
+      sendToBackend({ type: "set_volume", percent });
     }, 200);
   });
 
@@ -477,6 +482,12 @@ export function createMiniPlayerUI(
     root,
     update,
     setDevices,
+    setVolume(percent: number) {
+      volumeSlider.value = String(percent);
+    },
+    onVolumeChange(handler: (percent: number) => void) {
+      volumeChangeHandlers.add(handler);
+    },
     toggle() {
       if (visible) {
         hide();
@@ -491,6 +502,7 @@ export function createMiniPlayerUI(
       hide();
       stopTicking();
       if (volumeDebounce) clearTimeout(volumeDebounce);
+      volumeChangeHandlers.clear();
       root.remove();
     },
   };
