@@ -240,12 +240,12 @@ var PANEL_CSS = `
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .spotify-ctrl-btn {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: none;
   background: transparent;
@@ -267,8 +267,8 @@ var PANEL_CSS = `
 }
 
 .spotify-ctrl-btn-main {
-  width: 40px;
-  height: 40px;
+  width: 56px;
+  height: 56px;
   background: #1db954;
   color: #fff;
 }
@@ -278,46 +278,60 @@ var PANEL_CSS = `
 }
 
 .spotify-ctrl-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   fill: currentColor;
 }
 
 .spotify-ctrl-btn-main svg {
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
 }
 
 /* Volume */
 .spotify-volume-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 0 4px;
 }
 
 .spotify-volume-slider {
   flex: 1;
-  height: 16px;
   -webkit-appearance: none;
   appearance: none;
-  background: transparent;
-  outline: none;
-}
-
-.spotify-volume-slider::-webkit-slider-runnable-track {
   height: 4px;
-  background: var(--lumiverse-fill);
   border-radius: 2px;
+  background: var(--lumiverse-fill-subtle);
+  border: 1px solid var(--lumiverse-border);
+  outline: none;
 }
 
 .spotify-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #1db954;
+  background: var(--lumiverse-primary);
   cursor: pointer;
-  margin-top: -5px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.spotify-volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lumiverse-fill-subtle);
+  border: 1px solid var(--lumiverse-border);
+}
+
+.spotify-volume-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--lumiverse-primary);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
 /* Search */
@@ -620,12 +634,12 @@ var PANEL_CSS = `
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .spotify-mini-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: none;
   background: transparent;
@@ -643,14 +657,14 @@ var PANEL_CSS = `
 }
 
 .spotify-mini-btn svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   fill: currentColor;
 }
 
 .spotify-mini-btn-main {
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   background: #1db954;
   color: #fff;
 }
@@ -660,8 +674,8 @@ var PANEL_CSS = `
 }
 
 .spotify-mini-btn-main svg {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
 }
 
 .spotify-mini-volume-row {
@@ -686,27 +700,40 @@ var PANEL_CSS = `
 
 .spotify-mini-volume-slider {
   flex: 1;
-  height: 16px;
   -webkit-appearance: none;
   appearance: none;
-  background: transparent;
-  outline: none;
-}
-
-.spotify-mini-volume-slider::-webkit-slider-runnable-track {
   height: 4px;
-  background: var(--lumiverse-fill);
   border-radius: 2px;
+  background: var(--lumiverse-fill-subtle);
+  border: 1px solid var(--lumiverse-border);
+  outline: none;
 }
 
 .spotify-mini-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: #1db954;
+  background: var(--lumiverse-primary);
   cursor: pointer;
-  margin-top: -4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.spotify-mini-volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lumiverse-fill-subtle);
+  border: 1px solid var(--lumiverse-border);
+}
+
+.spotify-mini-volume-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--lumiverse-primary);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
 .spotify-mini-empty {
@@ -2164,14 +2191,16 @@ function setup(ctx) {
     if (typeof saved.y === "number")
       savedY = saved.y;
   } catch {}
+  let lastKnownPos = null;
   function saveWidgetPrefs() {
-    const pos = widget.getPosition();
+    const pos = lastKnownPos ?? widget.getPosition();
     const prefs = { size: currentWidgetSize, shape: currentArtShape, sizeMode: currentSizeMode, x: pos.x, y: pos.y };
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     sendToBackend({ type: "save_widget_prefs", prefs });
   }
   let savePositionTimer = null;
-  function debounceSavePosition() {
+  function debounceSavePosition(pos) {
+    lastKnownPos = pos;
     if (savePositionTimer)
       clearTimeout(savePositionTimer);
     savePositionTimer = setTimeout(saveWidgetPrefs, 500);
@@ -2278,7 +2307,7 @@ function setup(ctx) {
     }
   }
   applyWidgetStyle();
-  widget.onDragEnd(() => debounceSavePosition());
+  widget.onDragEnd((pos) => debounceSavePosition(pos));
   if (savedX !== undefined && savedY !== undefined) {
     widget.moveTo(savedX, savedY);
   }
@@ -2419,7 +2448,7 @@ function setup(ctx) {
     applyWidgetStyle();
     widget.root.appendChild(widgetContent);
     widget.moveTo(pos.x, pos.y);
-    widget.onDragEnd(() => debounceSavePosition());
+    widget.onDragEnd((pos2) => debounceSavePosition(pos2));
     clampWidgetPosition();
   }
   widgetContent.addEventListener("contextmenu", (e) => {
