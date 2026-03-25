@@ -49,15 +49,18 @@ export function setup(ctx: SpindleFrontendContext) {
     if (typeof saved.x === "number") savedX = saved.x;
     if (typeof saved.y === "number") savedY = saved.y;
   } catch {}
+  let lastKnownPos: { x: number; y: number } | null = null;
+
   function saveWidgetPrefs() {
-    const pos = widget.getPosition();
+    const pos = lastKnownPos ?? widget.getPosition();
     const prefs: WidgetPrefs = { size: currentWidgetSize, shape: currentArtShape, sizeMode: currentSizeMode, x: pos.x, y: pos.y };
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     sendToBackend({ type: "save_widget_prefs", prefs });
   }
 
   let savePositionTimer: ReturnType<typeof setTimeout> | null = null;
-  function debounceSavePosition() {
+  function debounceSavePosition(pos: { x: number; y: number }) {
+    lastKnownPos = pos;
     if (savePositionTimer) clearTimeout(savePositionTimer);
     savePositionTimer = setTimeout(saveWidgetPrefs, 500);
   }
@@ -200,7 +203,7 @@ export function setup(ctx: SpindleFrontendContext) {
     }
   }
   applyWidgetStyle();
-  widget.onDragEnd(() => debounceSavePosition());
+  widget.onDragEnd((pos) => debounceSavePosition(pos));
   if (savedX !== undefined && savedY !== undefined) {
     widget.moveTo(savedX, savedY);
   }
@@ -361,7 +364,7 @@ export function setup(ctx: SpindleFrontendContext) {
     applyWidgetStyle();
     widget.root.appendChild(widgetContent);
     widget.moveTo(pos.x, pos.y);
-    widget.onDragEnd(() => debounceSavePosition());
+    widget.onDragEnd((pos) => debounceSavePosition(pos));
     clampWidgetPosition();
   }
 
