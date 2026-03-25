@@ -157,9 +157,9 @@ export async function getCurrentlyPlaying(): Promise<PlaybackState | null> {
 }
 
 export async function getCurrentPlayback(): Promise<PlaybackState | null> {
-  const currentlyPlaying = await getCurrentlyPlaying();
-  if (currentlyPlaying) return currentlyPlaying;
-
+  // Always use /me/player (not /me/player/currently-playing) because the full
+  // endpoint includes device data (volume, device name/type/id) that the
+  // currently-playing endpoint omits.
   const res = await spotifyFetch("/me/player");
   if (res.status === 204 || !res.body || res.body.trim() === "") return null;
   if (res.status !== 200) return null;
