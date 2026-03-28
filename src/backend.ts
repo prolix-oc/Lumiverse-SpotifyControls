@@ -135,7 +135,17 @@ async function cacheState(state: PlaybackState | null): Promise<void> {
   }
 }
 
-// ─── Polling ─────────────────────────────────────────────────────────────
+// ─── Permission-aware polling ────────────────────────────────────────────
+
+spindle.permissions.onChanged(({ permission, granted }) => {
+  if (permission !== "cors_proxy") return;
+  if (granted && spotify.isConnected()) {
+    startPolling();
+  } else if (!granted) {
+    stopPolling();
+    send({ type: "state", playbackState: null, connected: false });
+  }
+});
 
 const POLL_ACTIVE_MS = 5000;
 const POLL_PAUSED_MS = 15000;

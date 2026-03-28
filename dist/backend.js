@@ -100,18 +100,7 @@ async function spotifyFetch(endpoint, options = {}) {
   }
   return res;
 }
-async function getCurrentlyPlaying() {
-  const res = await spotifyFetch("/me/player/currently-playing");
-  if (res.status === 204 || !res.body || res.body.trim() === "")
-    return null;
-  if (res.status !== 200)
-    return null;
-  return parsePlaybackState(JSON.parse(res.body));
-}
 async function getCurrentPlayback() {
-  const currentlyPlaying = await getCurrentlyPlaying();
-  if (currentlyPlaying)
-    return currentlyPlaying;
   const res = await spotifyFetch("/me/player");
   if (res.status === 204 || !res.body || res.body.trim() === "")
     return null;
@@ -474,6 +463,16 @@ async function cacheState(state) {
     await spindle.userStorage.delete("last_state.json", activeUserId2).catch(() => {});
   }
 }
+spindle.permissions.onChanged(({ permission, granted }) => {
+  if (permission !== "cors_proxy")
+    return;
+  if (granted && isConnected()) {
+    startPolling();
+  } else if (!granted) {
+    stopPolling();
+    send({ type: "state", playbackState: null, connected: false });
+  }
+});
 var POLL_ACTIVE_MS = 5000;
 var POLL_PAUSED_MS = 15000;
 function startPolling() {

@@ -443,6 +443,7 @@ export const PANEL_CSS = `
   align-items: center;
   justify-content: center;
   transition: box-shadow var(--lumiverse-transition-fast);
+  touch-action: none;
 }
 
 .spotify-float-widget:hover {

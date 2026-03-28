@@ -8,7 +8,6 @@ import { createSearchUI } from "./ui/search";
 import { createMiniPlayerUI } from "./ui/mini-player";
 import { createCrossfadeArt } from "./ui/crossfade-art";
 import { createLyricsUI } from "./ui/lyrics";
-import { createPermissionModal, PERMISSION_MODAL_CSS } from "./ui/permission-modal";
 
 const SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 const MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
@@ -17,7 +16,7 @@ export function setup(ctx: SpindleFrontendContext) {
   const cleanups: (() => void)[] = [];
 
   // Add styles
-  const removeStyle = ctx.dom.addStyle(PANEL_CSS + PERMISSION_MODAL_CSS);
+  const removeStyle = ctx.dom.addStyle(PANEL_CSS);
   cleanups.push(removeStyle);
 
   // State
@@ -192,6 +191,7 @@ export function setup(ctx: SpindleFrontendContext) {
     // Ensure both the framework container and inner content match the target size
     widget.root.style.width = `${currentWidgetSize}px`;
     widget.root.style.height = `${currentWidgetSize}px`;
+    widget.root.style.touchAction = "none";
     widgetContent.style.width = `${currentWidgetSize}px`;
     widgetContent.style.height = `${currentWidgetSize}px`;
     widgetContent.style.borderRadius = radius;
@@ -334,7 +334,7 @@ export function setup(ctx: SpindleFrontendContext) {
       navigator.vibrate?.(50);
       showContextMenu(touch.clientX, touch.clientY);
     }, 500);
-  }, { passive: true });
+  });
 
   widgetContent.addEventListener("touchmove", (e) => {
     if (!longPressTimer) return;
@@ -343,11 +343,19 @@ export function setup(ctx: SpindleFrontendContext) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
-  }, { passive: true });
+  });
 
   widgetContent.addEventListener("touchend", (e) => {
+    // Always prevent default to block synthetic click/mouse events from
+    // reaching elements underneath the floating widget on mobile.
+    e.preventDefault();
     if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-    if (longPressFired) { e.preventDefault(); longPressFired = false; }
+    if (longPressFired) { longPressFired = false; return; }
+    // Since we block the browser's click generation, handle taps here
+    if (!didDrag) {
+      miniPlayer.toggle();
+    }
+    didDrag = false;
   });
 
   function recreateWidget(newSize: number) {
@@ -536,24 +544,46 @@ export function setup(ctx: SpindleFrontendContext) {
   });
   cleanups.push(msgUnsub);
 
-  // ─── Permission gate ─────────────────────────────────────────────────
+  // ─── Permission gate (real-time) ─────────────────────────────────────
+  // SPINDLE_PERMISSION_CHANGED is broadcast on the event bus with an
+  // extensionId — scope to our own identifier so we ignore other extensions.
 
-  let permModal: ReturnType<typeof createPermissionModal> | null = null;
+  const permUnsub = ctx.events.on("SPINDLE_PERMISSION_CHANGED", (payload: unknown) => {
+    const detail = payload as { extensionId: string; permission: string; granted: boolean };
+    if (detail.extensionId !== ctx.manifest.identifier) return;
+    if (detail.permission !== "cors_proxy") return;
 
+    if (detail.granted) {
+      sendToBackend({ type: "get_config" });
+      sendToBackend({ type: "get_state" });
+    } else {
+      currentState = null;
+      connected = false;
+      nowPlayingUI.update(null, false);
+      controlsUI.update(null, false);
+      miniPlayer.update(null, false);
+      updateWidget(null);
+    }
+  });
+  cleanups.push(permUnsub);
+
+  // Prompt once on startup if the permission hasn't been granted yet
   ctx.permissions.getGranted().then((granted) => {
     if (granted.includes("cors_proxy")) return;
-
-    permModal = createPermissionModal(
-      async () => {
-        await ctx.permissions.request(["cors_proxy"]);
-        // Extension will restart after the grant — this is expected
-      },
-      () => {
-        // User dismissed — they can still browse settings, just API calls won't work
-        permModal = null;
-      }
-    );
-    cleanups.push(() => permModal?.destroy());
+    ctx.ui
+      .showConfirm({
+        title: "Permission Required",
+        message:
+          "Spotify Controls needs the CORS Proxy permission to communicate with the Spotify and Last.fm APIs on your behalf.",
+        variant: "info",
+        confirmLabel: "Grant Permission",
+        cancelLabel: "Not Now",
+      })
+      .then(({ confirmed }) => {
+        if (confirmed) {
+          ctx.permissions.request(["cors_proxy"]);
+        }
+      });
   });
 
   // ─── Request initial state ───────────────────────────────────────────

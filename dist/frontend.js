@@ -444,6 +444,7 @@ var PANEL_CSS = `
   align-items: center;
   justify-content: center;
   transition: box-shadow var(--lumiverse-transition-fast);
+  touch-action: none;
 }
 
 .spotify-float-widget:hover {
@@ -1339,11 +1340,15 @@ function createControlsUI(sendToBackend) {
     sendToBackend({ type: "set_repeat", mode: nextMode });
   });
   let volumeDebounce = null;
+  const volumeChangeHandlers = new Set;
   volumeSlider.addEventListener("input", () => {
+    const percent = parseInt(volumeSlider.value, 10);
+    for (const h of volumeChangeHandlers)
+      h(percent);
     if (volumeDebounce)
       clearTimeout(volumeDebounce);
     volumeDebounce = setTimeout(() => {
-      sendToBackend({ type: "set_volume", percent: parseInt(volumeSlider.value, 10) });
+      sendToBackend({ type: "set_volume", percent });
     }, 200);
   });
   function update(state, connected) {
@@ -1373,9 +1378,16 @@ function createControlsUI(sendToBackend) {
   return {
     root,
     update,
+    setVolume(percent) {
+      volumeSlider.value = String(percent);
+    },
+    onVolumeChange(handler) {
+      volumeChangeHandlers.add(handler);
+    },
     destroy() {
       if (volumeDebounce)
         clearTimeout(volumeDebounce);
+      volumeChangeHandlers.clear();
       root.remove();
     }
   };
@@ -1647,12 +1659,16 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     sendToBackend({ type: "seek", positionMs: Math.round(pct * currentDuration) });
   });
   let volumeDebounce = null;
+  const volumeChangeHandlers = new Set;
   volumeSlider.addEventListener("input", (e) => {
     e.stopPropagation();
+    const percent = parseInt(volumeSlider.value, 10);
+    for (const h of volumeChangeHandlers)
+      h(percent);
     if (volumeDebounce)
       clearTimeout(volumeDebounce);
     volumeDebounce = setTimeout(() => {
-      sendToBackend({ type: "set_volume", percent: parseInt(volumeSlider.value, 10) });
+      sendToBackend({ type: "set_volume", percent });
     }, 200);
   });
   let deviceListOpen = false;
@@ -1831,6 +1847,12 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     root,
     update,
     setDevices,
+    setVolume(percent) {
+      volumeSlider.value = String(percent);
+    },
+    onVolumeChange(handler) {
+      volumeChangeHandlers.add(handler);
+    },
     toggle() {
       if (visible) {
         hide();
@@ -1846,6 +1868,7 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       stopTicking();
       if (volumeDebounce)
         clearTimeout(volumeDebounce);
+      volumeChangeHandlers.clear();
       root.remove();
     }
   };
@@ -1914,252 +1937,12 @@ function createLyricsUI() {
   };
 }
 
-// src/ui/permission-modal.ts
-var SHIELD_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`;
-var SPINNER_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10" stroke-dasharray="31.4" stroke-dashoffset="0"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></path></svg>`;
-var CHECK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-function createPermissionModal(onGrant, onDismiss) {
-  const backdrop = document.createElement("div");
-  backdrop.className = "spotify-perm-backdrop";
-  const modal = document.createElement("div");
-  modal.className = "spotify-perm-modal";
-  const iconWrap = document.createElement("div");
-  iconWrap.className = "spotify-perm-icon";
-  iconWrap.innerHTML = SHIELD_SVG;
-  const title = document.createElement("h3");
-  title.className = "spotify-perm-title";
-  title.textContent = "Permission Required";
-  const desc = document.createElement("p");
-  desc.className = "spotify-perm-desc";
-  desc.textContent = "Spotify Controls needs the CORS Proxy permission to communicate with the Spotify API. " + "This allows the extension to securely make requests to Spotify and Last.fm on your behalf.";
-  const pill = document.createElement("div");
-  pill.className = "spotify-perm-pill";
-  pill.textContent = "Cors Proxy";
-  const actions = document.createElement("div");
-  actions.className = "spotify-perm-actions";
-  const cancelBtn = document.createElement("button");
-  cancelBtn.className = "spotify-perm-cancel";
-  cancelBtn.textContent = "Not Now";
-  const grantBtn = document.createElement("button");
-  grantBtn.className = "spotify-perm-grant";
-  grantBtn.textContent = "Grant Permission";
-  actions.appendChild(cancelBtn);
-  actions.appendChild(grantBtn);
-  modal.appendChild(iconWrap);
-  modal.appendChild(title);
-  modal.appendChild(desc);
-  modal.appendChild(pill);
-  modal.appendChild(actions);
-  backdrop.appendChild(modal);
-  requestAnimationFrame(() => {
-    backdrop.classList.add("visible");
-  });
-  function dismiss() {
-    backdrop.classList.remove("visible");
-    setTimeout(() => backdrop.remove(), 200);
-    onDismiss();
-  }
-  cancelBtn.addEventListener("click", dismiss);
-  backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop)
-      dismiss();
-  });
-  const handleEscape = (e) => {
-    if (e.key === "Escape")
-      dismiss();
-  };
-  document.addEventListener("keydown", handleEscape);
-  grantBtn.addEventListener("click", async () => {
-    grantBtn.disabled = true;
-    cancelBtn.disabled = true;
-    grantBtn.innerHTML = `<span class="spotify-perm-spinner">${SPINNER_SVG}</span>Applying...`;
-    grantBtn.classList.add("loading");
-    try {
-      await onGrant();
-      grantBtn.innerHTML = `<span class="spotify-perm-check">${CHECK_SVG}</span>Granted!`;
-      grantBtn.classList.remove("loading");
-      grantBtn.classList.add("success");
-    } catch (err) {
-      grantBtn.disabled = false;
-      cancelBtn.disabled = false;
-      grantBtn.classList.remove("loading");
-      const isPrivilegeError = err?.message?.includes("403") || err?.message?.includes("admin");
-      if (isPrivilegeError) {
-        grantBtn.textContent = "Grant Permission";
-        desc.textContent = "This permission requires administrator approval. " + "Please ask an admin to enable the CORS Proxy permission for Spotify Controls in the extension settings.";
-        desc.style.color = "rgba(239, 68, 68, 0.9)";
-      } else {
-        grantBtn.textContent = "Retry";
-      }
-    }
-  });
-  document.body.appendChild(backdrop);
-  return {
-    root: backdrop,
-    destroy() {
-      document.removeEventListener("keydown", handleEscape);
-      backdrop.remove();
-    }
-  };
-}
-var PERMISSION_MODAL_CSS = `
-.spotify-perm-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10003;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0);
-  backdrop-filter: blur(0px);
-  transition: background 0.2s ease, backdrop-filter 0.2s ease;
-  font-family: system-ui, -apple-system, sans-serif;
-}
-
-.spotify-perm-backdrop.visible {
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-}
-
-.spotify-perm-modal {
-  max-width: 380px;
-  width: calc(100% - 32px);
-  padding: 28px 24px 20px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, var(--lumiverse-fill, #1e1e2e) 0%, var(--lumiverse-fill-subtle, #181825) 100%);
-  border: 1px solid rgba(147, 112, 219, 0.2);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(147, 112, 219, 0.15);
-  text-align: center;
-  transform: scale(0.95) translateY(10px);
-  opacity: 0;
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
-}
-
-.spotify-perm-backdrop.visible .spotify-perm-modal {
-  transform: scale(1) translateY(0);
-  opacity: 1;
-}
-
-.spotify-perm-icon {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 14px;
-  background: rgba(29, 185, 84, 0.15);
-  color: #1db954;
-}
-
-.spotify-perm-icon svg {
-  width: 24px;
-  height: 24px;
-}
-
-.spotify-perm-title {
-  margin: 0 0 8px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--lumiverse-text, #e0e0e0);
-}
-
-.spotify-perm-desc {
-  margin: 0 0 16px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.6));
-  transition: color 0.2s ease;
-}
-
-.spotify-perm-pill {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-  background: rgba(29, 185, 84, 0.12);
-  color: #1db954;
-  border: 1px solid rgba(29, 185, 84, 0.25);
-  margin-bottom: 20px;
-}
-
-.spotify-perm-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.spotify-perm-cancel {
-  flex: 1;
-  padding: 10px 16px;
-  border-radius: 10px;
-  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.08));
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--lumiverse-text, #e0e0e0);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.spotify-perm-cancel:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.spotify-perm-cancel:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.spotify-perm-grant {
-  flex: 1;
-  padding: 10px 16px;
-  border-radius: 10px;
-  border: none;
-  background: linear-gradient(135deg, rgba(29, 185, 84, 0.9), rgba(22, 163, 74, 0.9));
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.spotify-perm-grant:hover:not(:disabled) {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-}
-
-.spotify-perm-grant:disabled {
-  cursor: wait;
-}
-
-.spotify-perm-grant.loading {
-  background: linear-gradient(135deg, rgba(29, 185, 84, 0.6), rgba(22, 163, 74, 0.6));
-}
-
-.spotify-perm-grant.success {
-  background: linear-gradient(135deg, rgba(29, 185, 84, 0.9), rgba(22, 163, 74, 0.9));
-}
-
-.spotify-perm-spinner svg,
-.spotify-perm-check svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
-`;
-
 // src/frontend.ts
 var SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 var MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
 function setup(ctx) {
   const cleanups = [];
-  const removeStyle = ctx.dom.addStyle(PANEL_CSS + PERMISSION_MODAL_CSS);
+  const removeStyle = ctx.dom.addStyle(PANEL_CSS);
   cleanups.push(removeStyle);
   let currentState = null;
   let connected = false;
@@ -2296,6 +2079,7 @@ function setup(ctx) {
     const radius = currentArtShape === "circle" ? "50%" : "22%";
     widget.root.style.width = `${currentWidgetSize}px`;
     widget.root.style.height = `${currentWidgetSize}px`;
+    widget.root.style.touchAction = "none";
     widgetContent.style.width = `${currentWidgetSize}px`;
     widgetContent.style.height = `${currentWidgetSize}px`;
     widgetContent.style.borderRadius = radius;
@@ -2329,6 +2113,8 @@ function setup(ctx) {
     return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
   });
   cleanups.push(() => miniPlayer.destroy());
+  controlsUI.onVolumeChange((pct) => miniPlayer.setVolume(pct));
+  miniPlayer.onVolumeChange((pct) => controlsUI.setVolume(pct));
   let didDrag = false;
   let pointerStartPos = { x: 0, y: 0 };
   const DRAG_THRESHOLD = 5;
@@ -2413,7 +2199,7 @@ function setup(ctx) {
       navigator.vibrate?.(50);
       showContextMenu(touch.clientX, touch.clientY);
     }, 500);
-  }, { passive: true });
+  });
   widgetContent.addEventListener("touchmove", (e) => {
     if (!longPressTimer)
       return;
@@ -2422,16 +2208,21 @@ function setup(ctx) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
-  }, { passive: true });
+  });
   widgetContent.addEventListener("touchend", (e) => {
+    e.preventDefault();
     if (longPressTimer) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
     if (longPressFired) {
-      e.preventDefault();
       longPressFired = false;
+      return;
     }
+    if (!didDrag) {
+      miniPlayer.toggle();
+    }
+    didDrag = false;
   });
   function recreateWidget(newSize) {
     miniPlayer.hide();
@@ -2581,16 +2372,39 @@ function setup(ctx) {
     }
   });
   cleanups.push(msgUnsub);
-  let permModal = null;
+  const permUnsub = ctx.events.on("SPINDLE_PERMISSION_CHANGED", (payload) => {
+    const detail = payload;
+    if (detail.extensionId !== ctx.manifest.identifier)
+      return;
+    if (detail.permission !== "cors_proxy")
+      return;
+    if (detail.granted) {
+      sendToBackend({ type: "get_config" });
+      sendToBackend({ type: "get_state" });
+    } else {
+      currentState = null;
+      connected = false;
+      nowPlayingUI.update(null, false);
+      controlsUI.update(null, false);
+      miniPlayer.update(null, false);
+      updateWidget(null);
+    }
+  });
+  cleanups.push(permUnsub);
   ctx.permissions.getGranted().then((granted) => {
     if (granted.includes("cors_proxy"))
       return;
-    permModal = createPermissionModal(async () => {
-      await ctx.permissions.request(["cors_proxy"]);
-    }, () => {
-      permModal = null;
+    ctx.ui.showConfirm({
+      title: "Permission Required",
+      message: "Spotify Controls needs the CORS Proxy permission to communicate with the Spotify and Last.fm APIs on your behalf.",
+      variant: "info",
+      confirmLabel: "Grant Permission",
+      cancelLabel: "Not Now"
+    }).then(({ confirmed }) => {
+      if (confirmed) {
+        ctx.permissions.request(["cors_proxy"]);
+      }
     });
-    cleanups.push(() => permModal?.destroy());
   });
   sendToBackend({ type: "get_config" });
   sendToBackend({ type: "get_state" });
