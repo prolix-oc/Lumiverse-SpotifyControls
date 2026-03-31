@@ -6,7 +6,7 @@
   "github": "https://github.com/prolix-oc/Lumiverse-SpotifyControls",
   "homepage": "https://lumiverse.chat",
   "description": "Control Spotify playback, view now playing, search tracks, and integrate with LLM prompts.",
-  "permissions": ["cors_proxy", "tools", "ui_panels", "oauth"],
+  "permissions": ["cors_proxy", "tools", "ui_panels", "oauth", "app_manipulation"],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"
 }
