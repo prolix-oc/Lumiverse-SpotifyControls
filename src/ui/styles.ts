@@ -302,7 +302,7 @@ export const PANEL_CSS = `
   height: 4px;
   border-radius: 2px;
   background: var(--lumiverse-fill-subtle);
-  border: 1px solid var(--lumiverse-border);
+  border: none;
   outline: none;
 }
 
@@ -320,7 +320,7 @@ export const PANEL_CSS = `
   height: 4px;
   border-radius: 2px;
   background: var(--lumiverse-fill-subtle);
-  border: 1px solid var(--lumiverse-border);
+  border: none;
 }
 
 .spotify-volume-slider::-moz-range-thumb {

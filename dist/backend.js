@@ -790,31 +790,15 @@ async function applyAlbumTheme(colors) {
       await spindle.theme.clear();
       return;
     }
-    const { dominantHsl, isLight } = colors;
-    const { h, s } = dominantHsl;
-    const primaryS = Math.min(s, 80);
-    const primaryL = isLight ? Math.min(55, dominantHsl.l) : Math.max(50, dominantHsl.l);
-    const bgS = Math.min(s, 15);
-    await spindle.theme.apply({
-      variables: {
-        "--lumiverse-primary": `hsl(${h}, ${primaryS}%, ${primaryL}%)`,
-        "--lumiverse-primary-hover": `hsl(${h}, ${primaryS}%, ${Math.min(primaryL + 8, 70)}%)`
-      },
-      variablesByMode: {
-        dark: {
-          "--lumiverse-bg": `hsl(${h}, ${bgS}%, 10%)`,
-          "--lumiverse-bg-elevated": `hsl(${h}, ${bgS}%, 13%)`,
-          "--lumiverse-fill": `hsl(${h}, ${bgS}%, 16%)`,
-          "--lumiverse-fill-subtle": `hsl(${h}, ${bgS}%, 13%)`
-        },
-        light: {
-          "--lumiverse-bg": `hsl(${h}, ${Math.min(s, 20)}%, 96%)`,
-          "--lumiverse-bg-elevated": `hsl(${h}, ${Math.min(s, 20)}%, 100%)`,
-          "--lumiverse-fill": `hsl(${h}, ${Math.min(s, 20)}%, 93%)`,
-          "--lumiverse-fill-subtle": `hsl(${h}, ${Math.min(s, 20)}%, 96%)`
-        }
-      }
+    const currentTheme = await spindle.theme.getCurrent();
+    const vars = await spindle.theme.generateVariables({
+      accent: colors.dominantHsl,
+      mode: currentTheme.mode,
+      enableGlass: currentTheme.enableGlass,
+      radiusScale: currentTheme.radiusScale,
+      fontScale: currentTheme.fontScale
     });
+    await spindle.theme.apply({ variables: vars });
   } catch (err) {
     spindle.log.warn(`Album theme: ${err?.message}`);
   }
