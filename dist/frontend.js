@@ -303,7 +303,7 @@ var PANEL_CSS = `
   height: 4px;
   border-radius: 2px;
   background: var(--lumiverse-fill-subtle);
-  border: 1px solid var(--lumiverse-border);
+  border: none;
   outline: none;
 }
 
@@ -321,7 +321,7 @@ var PANEL_CSS = `
   height: 4px;
   border-radius: 2px;
   background: var(--lumiverse-fill-subtle);
-  border: 1px solid var(--lumiverse-border);
+  border: none;
 }
 
 .spotify-volume-slider::-moz-range-thumb {
@@ -706,7 +706,7 @@ var PANEL_CSS = `
   height: 4px;
   border-radius: 2px;
   background: var(--lumiverse-fill-subtle);
-  border: 1px solid var(--lumiverse-border);
+  border: none;
   outline: none;
 }
 
@@ -724,7 +724,7 @@ var PANEL_CSS = `
   height: 4px;
   border-radius: 2px;
   background: var(--lumiverse-fill-subtle);
-  border: 1px solid var(--lumiverse-border);
+  border: none;
 }
 
 .spotify-mini-volume-slider::-moz-range-thumb {
