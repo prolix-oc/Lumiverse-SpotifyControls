@@ -1,6 +1,6 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
-import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult } from "./types";
+import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors } from "./types";
 import * as spotify from "./spotify-api";
 
 // ─── State ───────────────────────────────────────────────────────────────
@@ -158,17 +158,48 @@ function startPolling() {
   void primePlaybackState(generation);
 }
 
+/** Tracks consecutive null-state polls so we keep fast-polling through brief
+ *  Spotify API gaps (e.g. during track transitions on external devices). */
+let nullStateRetries = 0;
+const MAX_NULL_RETRIES = 3;
+
 function scheduleNextPoll() {
-  const interval = lastState?.isPlaying ? POLL_ACTIVE_MS : POLL_PAUSED_MS;
+  // Use fast polling when playing, or when state just went null (may be
+  // mid-transition on an external device — keep checking quickly).
+  const useFastPoll = lastState?.isPlaying || nullStateRetries > 0;
+  const interval = useFastPoll ? POLL_ACTIVE_MS : POLL_PAUSED_MS;
+
   pollingInterval = setTimeout(async () => {
     if (!spotify.isConnected()) {
       scheduleNextPoll();
       return;
     }
+    const previousUri = lastState?.trackUri ?? null;
     try {
       const state = await spotify.getCurrentPlayback();
+      // Track null-state transitions to avoid falling into 15s slow polling
+      // while Spotify is briefly between tracks
+      if (!state && previousUri) {
+        nullStateRetries = Math.min(nullStateRetries + 1, MAX_NULL_RETRIES);
+      } else {
+        nullStateRetries = 0;
+      }
       cacheState(state);
       send({ type: "state", playbackState: state, connected: true });
+
+      // If the track changed externally, do a quick follow-up fetch so the
+      // frontend gets the most settled state (progress, duration, etc.)
+      if (state && previousUri && state.trackUri !== previousUri) {
+        setTimeout(async () => {
+          try {
+            const fresh = await spotify.getCurrentPlayback();
+            if (fresh) {
+              cacheState(fresh);
+              send({ type: "state", playbackState: fresh, connected: true });
+            }
+          } catch {}
+        }, 1200);
+      }
     } catch (err: any) {
       spindle.log.warn(`Polling error: ${err?.message}`);
     }
@@ -218,9 +249,25 @@ async function primePlaybackState(generation: number): Promise<void> {
 /**
  * Push a state update after a short delay.
  * Spotify's API needs a moment to reflect changes from playback commands.
+ *
+ * When `expectTrackChange` is true (e.g. next/previous), schedules multiple
+ * retries so we keep fetching until the track URI actually changes — Spotify
+ * can take up to a few seconds to reflect a skip.
  */
-function pushStateAfterCommand() {
-  setTimeout(pushStateUpdate, 300);
+function pushStateAfterCommand(expectTrackChange = false) {
+  if (!expectTrackChange) {
+    setTimeout(pushStateUpdate, 300);
+    return;
+  }
+  const previousUri = lastState?.trackUri ?? null;
+  const retryAt = [300, 900, 1800, 3500];
+  for (const delay of retryAt) {
+    setTimeout(async () => {
+      // If a previous retry already detected the change, skip
+      if (lastState?.trackUri !== previousUri) return;
+      await pushStateUpdate();
+    }, delay);
+  }
 }
 
 // ─── OAuth callback handler ─────────────────────────────────────────────
@@ -342,6 +389,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       case "disconnect": {
         stopPolling();
         await spotify.clearTokens();
+        await spindle.theme.clear().catch(() => {});
         send({ type: "disconnected" });
         send({ type: "state", playbackState: null, connected: false });
         break;
@@ -362,12 +410,12 @@ spindle.onFrontendMessage(async (raw, userId) => {
 
       case "next":
         await spotify.next();
-        pushStateAfterCommand();
+        pushStateAfterCommand(true);
         break;
 
       case "previous":
         await spotify.previous();
-        pushStateAfterCommand();
+        pushStateAfterCommand(true);
         break;
 
       case "seek":
@@ -452,6 +500,11 @@ spindle.onFrontendMessage(async (raw, userId) => {
         });
         break;
       }
+
+      case "album_colors": {
+        await applyAlbumTheme(msg.colors);
+        break;
+      }
     }
   } catch (err: any) {
     send({ type: "error", message: err?.message || "Unknown error" });
@@ -487,6 +540,99 @@ async function getLyricsForCurrentTrack(): Promise<spotify.LyricsData | null> {
     return null;
   }
 }
+
+// ─── Album theme ────────────────────────────────────────────────────────
+
+async function applyAlbumTheme(colors: AlbumColors | null): Promise<void> {
+  try {
+    if (!colors) {
+      await spindle.theme.clear();
+      return;
+    }
+    const { dominantHsl, isLight } = colors;
+    const { h, s } = dominantHsl;
+    // Clamp saturation and lightness for readable UI colors
+    const primaryS = Math.min(s, 80);
+    const primaryL = isLight ? Math.min(55, dominantHsl.l) : Math.max(50, dominantHsl.l);
+    const bgS = Math.min(s, 15);
+    await spindle.theme.apply({
+      variables: {
+        "--lumiverse-primary": `hsl(${h}, ${primaryS}%, ${primaryL}%)`,
+        "--lumiverse-primary-hover": `hsl(${h}, ${primaryS}%, ${Math.min(primaryL + 8, 70)}%)`,
+      },
+      variablesByMode: {
+        dark: {
+          "--lumiverse-bg": `hsl(${h}, ${bgS}%, 10%)`,
+          "--lumiverse-bg-elevated": `hsl(${h}, ${bgS}%, 13%)`,
+          "--lumiverse-fill": `hsl(${h}, ${bgS}%, 16%)`,
+          "--lumiverse-fill-subtle": `hsl(${h}, ${bgS}%, 13%)`,
+        },
+        light: {
+          "--lumiverse-bg": `hsl(${h}, ${Math.min(s, 20)}%, 96%)`,
+          "--lumiverse-bg-elevated": `hsl(${h}, ${Math.min(s, 20)}%, 100%)`,
+          "--lumiverse-fill": `hsl(${h}, ${Math.min(s, 20)}%, 93%)`,
+          "--lumiverse-fill-subtle": `hsl(${h}, ${Math.min(s, 20)}%, 96%)`,
+        },
+      },
+    });
+  } catch (err: any) {
+    spindle.log.warn(`Album theme: ${err?.message}`);
+  }
+}
+
+// ─── Command Palette ────────────────────────────────────────────────────
+
+spindle.commands.register([
+  {
+    id: "play-pause",
+    label: "Play / Pause",
+    description: "Toggle Spotify playback",
+    keywords: ["music", "play", "pause", "stop", "resume", "song"],
+    scope: "global",
+  },
+  {
+    id: "next-track",
+    label: "Next Track",
+    description: "Skip to the next track on Spotify",
+    keywords: ["skip", "forward", "next", "song", "music"],
+    scope: "global",
+  },
+  {
+    id: "previous-track",
+    label: "Previous Track",
+    description: "Go back to the previous track on Spotify",
+    keywords: ["back", "rewind", "previous", "song", "music"],
+    scope: "global",
+  },
+]);
+
+spindle.commands.onInvoked(async (commandId) => {
+  if (!spotify.isConnected()) return;
+  try {
+    switch (commandId) {
+      case "play-pause": {
+        const state = lastState || await spotify.getCurrentPlayback();
+        if (state?.isPlaying) {
+          await spotify.pause();
+        } else {
+          await spotify.play({});
+        }
+        pushStateAfterCommand();
+        break;
+      }
+      case "next-track":
+        await spotify.next();
+        pushStateAfterCommand(true);
+        break;
+      case "previous-track":
+        await spotify.previous();
+        pushStateAfterCommand(true);
+        break;
+    }
+  } catch (err: any) {
+    spindle.log.warn(`Command "${commandId}": ${err?.message}`);
+  }
+});
 
 // ─── Macros ──────────────────────────────────────────────────────────────
 

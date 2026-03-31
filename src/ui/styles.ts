@@ -872,10 +872,11 @@ export const PANEL_CSS = `
 
 .spotify-lyrics-text {
   white-space: pre-wrap;
-  font-size: 12.5px;
-  line-height: 1.7;
+  font-size: 15px;
+  line-height: 1.8;
   color: var(--lumiverse-text-muted);
-  padding: 4px 0;
+  text-align: center;
+  padding: 8px 0;
 }
 
 `;

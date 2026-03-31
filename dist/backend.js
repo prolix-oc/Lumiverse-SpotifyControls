@@ -482,17 +482,37 @@ function startPolling() {
   scheduleNextPoll();
   primePlaybackState(generation);
 }
+var nullStateRetries = 0;
+var MAX_NULL_RETRIES = 3;
 function scheduleNextPoll() {
-  const interval = lastState?.isPlaying ? POLL_ACTIVE_MS : POLL_PAUSED_MS;
+  const useFastPoll = lastState?.isPlaying || nullStateRetries > 0;
+  const interval = useFastPoll ? POLL_ACTIVE_MS : POLL_PAUSED_MS;
   pollingInterval = setTimeout(async () => {
     if (!isConnected()) {
       scheduleNextPoll();
       return;
     }
+    const previousUri = lastState?.trackUri ?? null;
     try {
       const state = await getCurrentPlayback();
+      if (!state && previousUri) {
+        nullStateRetries = Math.min(nullStateRetries + 1, MAX_NULL_RETRIES);
+      } else {
+        nullStateRetries = 0;
+      }
       cacheState(state);
       send({ type: "state", playbackState: state, connected: true });
+      if (state && previousUri && state.trackUri !== previousUri) {
+        setTimeout(async () => {
+          try {
+            const fresh = await getCurrentPlayback();
+            if (fresh) {
+              cacheState(fresh);
+              send({ type: "state", playbackState: fresh, connected: true });
+            }
+          } catch {}
+        }, 1200);
+      }
     } catch (err) {
       spindle.log.warn(`Polling error: ${err?.message}`);
     }
@@ -531,8 +551,20 @@ async function primePlaybackState(generation) {
     }
   }
 }
-function pushStateAfterCommand() {
-  setTimeout(pushStateUpdate, 300);
+function pushStateAfterCommand(expectTrackChange = false) {
+  if (!expectTrackChange) {
+    setTimeout(pushStateUpdate, 300);
+    return;
+  }
+  const previousUri = lastState?.trackUri ?? null;
+  const retryAt = [300, 900, 1800, 3500];
+  for (const delay of retryAt) {
+    setTimeout(async () => {
+      if (lastState?.trackUri !== previousUri)
+        return;
+      await pushStateUpdate();
+    }, delay);
+  }
 }
 spindle.oauth.onCallback(async (params) => {
   const { code, state, error } = params;
@@ -629,6 +661,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       case "disconnect": {
         stopPolling();
         await clearTokens();
+        await spindle.theme.clear().catch(() => {});
         send({ type: "disconnected" });
         send({ type: "state", playbackState: null, connected: false });
         break;
@@ -646,11 +679,11 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       case "next":
         await next();
-        pushStateAfterCommand();
+        pushStateAfterCommand(true);
         break;
       case "previous":
         await previous();
-        pushStateAfterCommand();
+        pushStateAfterCommand(true);
         break;
       case "seek":
         await seek(msg.positionMs);
@@ -724,6 +757,10 @@ spindle.onFrontendMessage(async (raw, userId) => {
         });
         break;
       }
+      case "album_colors": {
+        await applyAlbumTheme(msg.colors);
+        break;
+      }
     }
   } catch (err) {
     send({ type: "error", message: err?.message || "Unknown error" });
@@ -747,6 +784,92 @@ async function getLyricsForCurrentTrack() {
     return null;
   }
 }
+async function applyAlbumTheme(colors) {
+  try {
+    if (!colors) {
+      await spindle.theme.clear();
+      return;
+    }
+    const { dominantHsl, isLight } = colors;
+    const { h, s } = dominantHsl;
+    const primaryS = Math.min(s, 80);
+    const primaryL = isLight ? Math.min(55, dominantHsl.l) : Math.max(50, dominantHsl.l);
+    const bgS = Math.min(s, 15);
+    await spindle.theme.apply({
+      variables: {
+        "--lumiverse-primary": `hsl(${h}, ${primaryS}%, ${primaryL}%)`,
+        "--lumiverse-primary-hover": `hsl(${h}, ${primaryS}%, ${Math.min(primaryL + 8, 70)}%)`
+      },
+      variablesByMode: {
+        dark: {
+          "--lumiverse-bg": `hsl(${h}, ${bgS}%, 10%)`,
+          "--lumiverse-bg-elevated": `hsl(${h}, ${bgS}%, 13%)`,
+          "--lumiverse-fill": `hsl(${h}, ${bgS}%, 16%)`,
+          "--lumiverse-fill-subtle": `hsl(${h}, ${bgS}%, 13%)`
+        },
+        light: {
+          "--lumiverse-bg": `hsl(${h}, ${Math.min(s, 20)}%, 96%)`,
+          "--lumiverse-bg-elevated": `hsl(${h}, ${Math.min(s, 20)}%, 100%)`,
+          "--lumiverse-fill": `hsl(${h}, ${Math.min(s, 20)}%, 93%)`,
+          "--lumiverse-fill-subtle": `hsl(${h}, ${Math.min(s, 20)}%, 96%)`
+        }
+      }
+    });
+  } catch (err) {
+    spindle.log.warn(`Album theme: ${err?.message}`);
+  }
+}
+spindle.commands.register([
+  {
+    id: "play-pause",
+    label: "Play / Pause",
+    description: "Toggle Spotify playback",
+    keywords: ["music", "play", "pause", "stop", "resume", "song"],
+    scope: "global"
+  },
+  {
+    id: "next-track",
+    label: "Next Track",
+    description: "Skip to the next track on Spotify",
+    keywords: ["skip", "forward", "next", "song", "music"],
+    scope: "global"
+  },
+  {
+    id: "previous-track",
+    label: "Previous Track",
+    description: "Go back to the previous track on Spotify",
+    keywords: ["back", "rewind", "previous", "song", "music"],
+    scope: "global"
+  }
+]);
+spindle.commands.onInvoked(async (commandId) => {
+  if (!isConnected())
+    return;
+  try {
+    switch (commandId) {
+      case "play-pause": {
+        const state = lastState || await getCurrentPlayback();
+        if (state?.isPlaying) {
+          await pause();
+        } else {
+          await play({});
+        }
+        pushStateAfterCommand();
+        break;
+      }
+      case "next-track":
+        await next();
+        pushStateAfterCommand(true);
+        break;
+      case "previous-track":
+        await previous();
+        pushStateAfterCommand(true);
+        break;
+    }
+  } catch (err) {
+    spindle.log.warn(`Command "${commandId}": ${err?.message}`);
+  }
+});
 spindle.registerMacro({
   name: "spotify_now_playing",
   category: "extension:spotify_controls",

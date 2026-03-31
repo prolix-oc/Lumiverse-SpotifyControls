@@ -1,5 +1,5 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
-import type { BackendToFrontend, PlaybackState, WidgetPrefs } from "./types";
+import type { BackendToFrontend, PlaybackState, WidgetPrefs, AlbumColors } from "./types";
 import { PANEL_CSS } from "./ui/styles";
 import { createSettingsUI } from "./ui/settings";
 import { createNowPlayingUI } from "./ui/now-playing";
@@ -79,6 +79,73 @@ export function setup(ctx: SpindleFrontendContext) {
     ctx.sendToBackend(msg);
   }
 
+  // ─── Album art color extraction (for theme) ──────────────────────────
+
+  let lastThemeArtUrl: string | null = null;
+
+  function extractColorsFromImage(url: string): Promise<AlbumColors | null> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          const S = 32;
+          canvas.width = S;
+          canvas.height = S;
+          const c = canvas.getContext("2d");
+          if (!c) { resolve(null); return; }
+          c.drawImage(img, 0, 0, S, S);
+          const px = c.getImageData(0, 0, S, S).data;
+
+          let bestH = 0, bestS = 0, bestL = 0.5, bestScore = -1;
+          let rTotal = 0, gTotal = 0, bTotal = 0, n = 0;
+
+          for (let i = 0; i < px.length; i += 4) {
+            const r = px[i], g = px[i + 1], b = px[i + 2];
+            rTotal += r; gTotal += g; bTotal += b; n++;
+
+            const rn = r / 255, gn = g / 255, bn = b / 255;
+            const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+            const l = (max + min) / 2;
+            let h = 0, s = 0;
+            if (max !== min) {
+              const d = max - min;
+              s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+              if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+              else if (max === gn) h = ((bn - rn) / d + 2) / 6;
+              else h = ((rn - gn) / d + 4) / 6;
+            }
+            // Prefer saturated, mid-lightness colors for the dominant pick
+            const score = s * (1 - Math.abs(l - 0.5) * 1.6);
+            if (score > bestScore) {
+              bestScore = score; bestH = h; bestS = s; bestL = l;
+            }
+          }
+
+          const avgR = Math.round(rTotal / n);
+          const avgG = Math.round(gTotal / n);
+          const avgB = Math.round(bTotal / n);
+          const luminance = 0.299 * avgR + 0.587 * avgG + 0.114 * avgB;
+
+          resolve({
+            dominant: { r: avgR, g: avgG, b: avgB },
+            dominantHsl: {
+              h: Math.round(bestH * 360),
+              s: Math.round(bestS * 100),
+              l: Math.round(bestL * 100),
+            },
+            isLight: luminance > 152,
+          });
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
   // ─── Settings (in settings_extensions mount) ──────────────────────────
 
   const settingsMount = ctx.ui.mount("settings_extensions");
@@ -131,7 +198,11 @@ export function setup(ctx: SpindleFrontendContext) {
 
   const tab = ctx.ui.registerDrawerTab({
     id: "spotify",
-    title: "Spotify",
+    title: "Spotify Controls",
+    shortName: "Spotify",
+    description: "Control Spotify playback, search for music, and view lyrics",
+    keywords: ["music", "player", "now playing", "song", "track", "album", "lyrics"],
+    headerTitle: "Spotify",
     iconSvg: SPOTIFY_ICON_SVG,
   });
   cleanups.push(() => tab.destroy());
@@ -447,6 +518,18 @@ export function setup(ctx: SpindleFrontendContext) {
         miniPlayer.update(currentState, connected);
         updateWidget(currentState);
         scheduleTrackEndRefresh(currentState);
+        // Extract album art colors for theme when art changes
+        const artUrl = currentState?.albumArtUrl ?? null;
+        if (artUrl !== lastThemeArtUrl) {
+          lastThemeArtUrl = artUrl;
+          if (artUrl) {
+            extractColorsFromImage(artUrl).then((colors) => {
+              sendToBackend({ type: "album_colors", colors });
+            });
+          } else {
+            sendToBackend({ type: "album_colors", colors: null });
+          }
+        }
         // Fetch lyrics when track changes
         const trackUri = currentState?.trackUri || null;
         if (trackUri && trackUri !== lastLyricsTrackUri) {
@@ -526,6 +609,8 @@ export function setup(ctx: SpindleFrontendContext) {
       case "disconnected":
         connected = false;
         currentState = null;
+        lastThemeArtUrl = null;
+        sendToBackend({ type: "album_colors", colors: null });
         settingsUI.update(false, "");
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);

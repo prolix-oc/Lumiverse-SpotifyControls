@@ -20,7 +20,8 @@ export type FrontendToBackend =
   | { type: "save_lastfm_key"; apiKey: string }
   | { type: "get_widget_prefs" }
   | { type: "save_widget_prefs"; prefs: WidgetPrefs }
-  | { type: "get_lyrics" };
+  | { type: "get_lyrics" }
+  | { type: "album_colors"; colors: AlbumColors | null };
 
 // ─── Backend → Frontend messages ─────────────────────────────────────────
 
@@ -87,6 +88,12 @@ export interface WidgetPrefs {
   sizeMode: "small" | "medium" | "large" | "custom";
   x?: number;
   y?: number;
+}
+
+export interface AlbumColors {
+  dominant: { r: number; g: number; b: number };
+  dominantHsl: { h: number; s: number; l: number };
+  isLight: boolean;
 }
 
 export interface SpotifyConfig {
