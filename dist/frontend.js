@@ -861,6 +861,9 @@ var PANEL_CSS = `
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
+  position: relative;
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 48px), transparent 100%);
+  mask-image: linear-gradient(to bottom, black calc(100% - 48px), transparent 100%);
 }
 
 .spotify-lyrics-status {
