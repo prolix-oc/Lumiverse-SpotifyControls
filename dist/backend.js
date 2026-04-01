@@ -790,15 +790,7 @@ async function applyAlbumTheme(colors, userId) {
       await spindle.theme.clear();
       return;
     }
-    const currentTheme = await spindle.theme.getCurrent(userId);
-    const vars = await spindle.theme.generateVariables({
-      accent: colors.dominantHsl,
-      mode: currentTheme.mode,
-      enableGlass: currentTheme.enableGlass,
-      radiusScale: currentTheme.radiusScale,
-      fontScale: currentTheme.fontScale
-    });
-    await spindle.theme.apply({ variables: vars });
+    await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
   } catch (err) {
     spindle.log.warn(`Album theme: ${err?.message}`);
   }

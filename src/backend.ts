@@ -549,17 +549,9 @@ async function applyAlbumTheme(colors: AlbumColors | null, userId?: string): Pro
       await spindle.theme.clear();
       return;
     }
-    // Use the host's theme engine to derive a full, coherent set of UI
-    // variables from the album art's dominant color.
-    const currentTheme = await spindle.theme.getCurrent(userId);
-    const vars = await spindle.theme.generateVariables({
-      accent: colors.dominantHsl,
-      mode: currentTheme.mode,
-      enableGlass: currentTheme.enableGlass,
-      radiusScale: currentTheme.radiusScale,
-      fontScale: currentTheme.fontScale,
-    });
-    await spindle.theme.apply({ variables: vars });
+    // Let Lumiverse own the final presentation layer (glass/alpha/shadows/
+    // mode-aware tokens) and only provide palette intent from the album art.
+    await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
   } catch (err: any) {
     spindle.log.warn(`Album theme: ${err?.message}`);
   }
