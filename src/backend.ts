@@ -502,7 +502,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
 
       case "album_colors": {
-        await applyAlbumTheme(msg.colors);
+        await applyAlbumTheme(msg.colors, userId);
         break;
       }
     }
@@ -543,7 +543,7 @@ async function getLyricsForCurrentTrack(): Promise<spotify.LyricsData | null> {
 
 // ─── Album theme ────────────────────────────────────────────────────────
 
-async function applyAlbumTheme(colors: AlbumColors | null): Promise<void> {
+async function applyAlbumTheme(colors: AlbumColors | null, userId?: string): Promise<void> {
   try {
     if (!colors) {
       await spindle.theme.clear();
@@ -551,7 +551,7 @@ async function applyAlbumTheme(colors: AlbumColors | null): Promise<void> {
     }
     // Use the host's theme engine to derive a full, coherent set of UI
     // variables from the album art's dominant color.
-    const currentTheme = await spindle.theme.getCurrent();
+    const currentTheme = await spindle.theme.getCurrent(userId);
     const vars = await spindle.theme.generateVariables({
       accent: colors.dominantHsl,
       mode: currentTheme.mode,

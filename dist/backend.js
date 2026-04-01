@@ -758,7 +758,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       }
       case "album_colors": {
-        await applyAlbumTheme(msg.colors);
+        await applyAlbumTheme(msg.colors, userId);
         break;
       }
     }
@@ -784,13 +784,13 @@ async function getLyricsForCurrentTrack() {
     return null;
   }
 }
-async function applyAlbumTheme(colors) {
+async function applyAlbumTheme(colors, userId) {
   try {
     if (!colors) {
       await spindle.theme.clear();
       return;
     }
-    const currentTheme = await spindle.theme.getCurrent();
+    const currentTheme = await spindle.theme.getCurrent(userId);
     const vars = await spindle.theme.generateVariables({
       accent: colors.dominantHsl,
       mode: currentTheme.mode,
