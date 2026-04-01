@@ -82,6 +82,32 @@ export function setup(ctx: SpindleFrontendContext) {
   // ─── Album art color extraction (for theme) ──────────────────────────
 
   let lastThemeArtUrl: string | null = null;
+  let themeApplySeq = 0;
+  let pendingThemeClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function cancelPendingThemeClear() {
+    if (pendingThemeClearTimer) {
+      clearTimeout(pendingThemeClearTimer);
+      pendingThemeClearTimer = null;
+    }
+  }
+
+  function clearAlbumTheme() {
+    cancelPendingThemeClear();
+    themeApplySeq += 1;
+    sendToBackend({ type: "album_colors", colors: null });
+  }
+
+  // Spotify can briefly report no active playback while transitioning between
+  // tracks/devices. Delay theme clearing so we do not flash back to the base
+  // app theme during those short gaps.
+  function scheduleAlbumThemeClear(delayMs = 1800) {
+    cancelPendingThemeClear();
+    pendingThemeClearTimer = setTimeout(() => {
+      pendingThemeClearTimer = null;
+      clearAlbumTheme();
+    }, delayMs);
+  }
 
   function extractColorsFromImage(url: string): Promise<AlbumColors | null> {
     return new Promise((resolve) => {
@@ -523,11 +549,19 @@ export function setup(ctx: SpindleFrontendContext) {
         if (artUrl !== lastThemeArtUrl) {
           lastThemeArtUrl = artUrl;
           if (artUrl) {
+            cancelPendingThemeClear();
+            const applySeq = ++themeApplySeq;
             extractColorsFromImage(artUrl).then((colors) => {
-              sendToBackend({ type: "album_colors", colors });
+              if (applySeq !== themeApplySeq || artUrl !== lastThemeArtUrl) return;
+              if (colors) {
+                sendToBackend({ type: "album_colors", colors });
+              } else if (!connected) {
+                clearAlbumTheme();
+              }
             });
           } else {
-            sendToBackend({ type: "album_colors", colors: null });
+            if (connected) scheduleAlbumThemeClear();
+            else clearAlbumTheme();
           }
         }
         // Fetch lyrics when track changes
@@ -610,7 +644,7 @@ export function setup(ctx: SpindleFrontendContext) {
         connected = false;
         currentState = null;
         lastThemeArtUrl = null;
-        sendToBackend({ type: "album_colors", colors: null });
+        clearAlbumTheme();
         settingsUI.update(false, "");
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
@@ -644,6 +678,7 @@ export function setup(ctx: SpindleFrontendContext) {
     } else {
       currentState = null;
       connected = false;
+      clearAlbumTheme();
       nowPlayingUI.update(null, false);
       controlsUI.update(null, false);
       miniPlayer.update(null, false);

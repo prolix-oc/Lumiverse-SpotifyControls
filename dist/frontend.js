@@ -2003,6 +2003,26 @@ function setup(ctx) {
     ctx.sendToBackend(msg);
   }
   let lastThemeArtUrl = null;
+  let themeApplySeq = 0;
+  let pendingThemeClearTimer = null;
+  function cancelPendingThemeClear() {
+    if (pendingThemeClearTimer) {
+      clearTimeout(pendingThemeClearTimer);
+      pendingThemeClearTimer = null;
+    }
+  }
+  function clearAlbumTheme() {
+    cancelPendingThemeClear();
+    themeApplySeq += 1;
+    sendToBackend({ type: "album_colors", colors: null });
+  }
+  function scheduleAlbumThemeClear(delayMs = 1800) {
+    cancelPendingThemeClear();
+    pendingThemeClearTimer = setTimeout(() => {
+      pendingThemeClearTimer = null;
+      clearAlbumTheme();
+    }, delayMs);
+  }
   function extractColorsFromImage(url) {
     return new Promise((resolve) => {
       const img = new Image;
@@ -2377,11 +2397,22 @@ function setup(ctx) {
         if (artUrl !== lastThemeArtUrl) {
           lastThemeArtUrl = artUrl;
           if (artUrl) {
+            cancelPendingThemeClear();
+            const applySeq = ++themeApplySeq;
             extractColorsFromImage(artUrl).then((colors) => {
-              sendToBackend({ type: "album_colors", colors });
+              if (applySeq !== themeApplySeq || artUrl !== lastThemeArtUrl)
+                return;
+              if (colors) {
+                sendToBackend({ type: "album_colors", colors });
+              } else if (!connected) {
+                clearAlbumTheme();
+              }
             });
           } else {
-            sendToBackend({ type: "album_colors", colors: null });
+            if (connected)
+              scheduleAlbumThemeClear();
+            else
+              clearAlbumTheme();
           }
         }
         const trackUri = currentState?.trackUri || null;
@@ -2446,7 +2477,7 @@ function setup(ctx) {
         connected = false;
         currentState = null;
         lastThemeArtUrl = null;
-        sendToBackend({ type: "album_colors", colors: null });
+        clearAlbumTheme();
         settingsUI.update(false, "");
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
@@ -2474,6 +2505,7 @@ function setup(ctx) {
     } else {
       currentState = null;
       connected = false;
+      clearAlbumTheme();
       nowPlayingUI.update(null, false);
       controlsUI.update(null, false);
       miniPlayer.update(null, false);
