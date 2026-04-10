@@ -369,8 +369,8 @@ var pollingInterval = null;
 var pollingGeneration = 0;
 var activeUserId2 = null;
 var pendingOAuth = null;
-function send(msg) {
-  spindle.sendToFrontend(msg);
+function send(msg, userId) {
+  spindle.sendToFrontend(msg, userId);
 }
 async function loadConfig(userId) {
   const stored = await spindle.storage.getJson("config.json", {
@@ -470,26 +470,31 @@ spindle.permissions.onChanged(({ permission, granted }) => {
     startPolling();
   } else if (!granted) {
     stopPolling();
-    send({ type: "state", playbackState: null, connected: false });
+    if (activeUserId2) {
+      send({ type: "state", playbackState: null, connected: false }, activeUserId2);
+    }
   }
 });
 var POLL_ACTIVE_MS = 5000;
 var POLL_PAUSED_MS = 15000;
 function startPolling() {
   stopPolling();
+  if (!activeUserId2)
+    return;
   pollingGeneration += 1;
   const generation = pollingGeneration;
-  scheduleNextPoll();
-  primePlaybackState(generation);
+  const userId = activeUserId2;
+  scheduleNextPoll(userId);
+  primePlaybackState(generation, userId);
 }
 var nullStateRetries = 0;
 var MAX_NULL_RETRIES = 3;
-function scheduleNextPoll() {
+function scheduleNextPoll(userId) {
   const useFastPoll = lastState?.isPlaying || nullStateRetries > 0;
   const interval = useFastPoll ? POLL_ACTIVE_MS : POLL_PAUSED_MS;
   pollingInterval = setTimeout(async () => {
     if (!isConnected()) {
-      scheduleNextPoll();
+      scheduleNextPoll(userId);
       return;
     }
     const previousUri = lastState?.trackUri ?? null;
@@ -501,14 +506,14 @@ function scheduleNextPoll() {
         nullStateRetries = 0;
       }
       cacheState(state);
-      send({ type: "state", playbackState: state, connected: true });
+      send({ type: "state", playbackState: state, connected: true }, userId);
       if (state && previousUri && state.trackUri !== previousUri) {
         setTimeout(async () => {
           try {
             const fresh = await getCurrentPlayback();
             if (fresh) {
               cacheState(fresh);
-              send({ type: "state", playbackState: fresh, connected: true });
+              send({ type: "state", playbackState: fresh, connected: true }, userId);
             }
           } catch {}
         }, 1200);
@@ -516,7 +521,7 @@ function scheduleNextPoll() {
     } catch (err) {
       spindle.log.warn(`Polling error: ${err?.message}`);
     }
-    scheduleNextPoll();
+    scheduleNextPoll(userId);
   }, interval);
 }
 function stopPolling() {
@@ -526,17 +531,17 @@ function stopPolling() {
   }
   pollingGeneration += 1;
 }
-async function pushStateUpdate() {
+async function pushStateUpdate(userId) {
   try {
     const state = await getCurrentPlayback();
     cacheState(state);
-    send({ type: "state", playbackState: state, connected: true });
+    send({ type: "state", playbackState: state, connected: true }, userId);
     return state;
   } catch {
     return null;
   }
 }
-async function primePlaybackState(generation) {
+async function primePlaybackState(generation, userId) {
   const retryDelays = [0, 1000, 3000];
   for (const delay of retryDelays) {
     if (delay > 0) {
@@ -545,15 +550,15 @@ async function primePlaybackState(generation) {
     if (generation !== pollingGeneration || !isConnected()) {
       return;
     }
-    const state = await pushStateUpdate();
+    const state = await pushStateUpdate(userId);
     if (state) {
       return;
     }
   }
 }
-function pushStateAfterCommand(expectTrackChange = false) {
+function pushStateAfterCommand(userId, expectTrackChange = false) {
   if (!expectTrackChange) {
-    setTimeout(pushStateUpdate, 300);
+    setTimeout(() => pushStateUpdate(userId), 300);
     return;
   }
   const previousUri = lastState?.trackUri ?? null;
@@ -562,15 +567,18 @@ function pushStateAfterCommand(expectTrackChange = false) {
     setTimeout(async () => {
       if (lastState?.trackUri !== previousUri)
         return;
-      await pushStateUpdate();
+      await pushStateUpdate(userId);
     }, delay);
   }
 }
 spindle.oauth.onCallback(async (params) => {
   const { code, state, error } = params;
+  const pendingUserId = pendingOAuth?.userId;
   if (error) {
     spindle.log.error(`Spotify OAuth error: ${error}`);
-    send({ type: "error", message: `Spotify authorization denied: ${error}` });
+    if (pendingUserId) {
+      send({ type: "error", message: `Spotify authorization denied: ${error}` }, pendingUserId);
+    }
     return { html: errorPage(`Authorization denied: ${error}`) };
   }
   if (!pendingOAuth || state !== pendingOAuth.state) {
@@ -580,14 +588,15 @@ spindle.oauth.onCallback(async (params) => {
   pendingOAuth = null;
   try {
     setActiveUser(oauthUserId);
+    activeUserId2 = oauthUserId;
     const tokens = await exchangeCodeForTokens(code, redirectUri, clientId, clientSecret);
     await saveTokens(tokens);
-    send({ type: "connected" });
+    send({ type: "connected" }, oauthUserId);
     startPolling();
     return { html: successPage() };
   } catch (err) {
     spindle.log.error(`OAuth token exchange failed: ${err?.message}`);
-    send({ type: "error", message: `Authentication failed: ${err?.message}` });
+    send({ type: "error", message: `Authentication failed: ${err?.message}` }, oauthUserId);
     return { html: errorPage(err?.message || "Token exchange failed. Please try again.") };
   }
 });
@@ -616,7 +625,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
     switch (msg.type) {
       case "get_state": {
         if (lastState && isConnected()) {
-          send({ type: "state", playbackState: lastState, connected: true });
+          send({ type: "state", playbackState: lastState, connected: true }, userId);
         }
         const playbackState = isConnected() ? await getCurrentPlayback() : null;
         cacheState(playbackState);
@@ -624,7 +633,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           type: "state",
           playbackState,
           connected: isConnected()
-        });
+        }, userId);
         break;
       }
       case "get_config": {
@@ -636,7 +645,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           connected: isConnected(),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey
-        });
+        }, userId);
         break;
       }
       case "connect": {
@@ -655,15 +664,15 @@ spindle.onFrontendMessage(async (raw, userId) => {
           redirect_uri: redirectUri,
           state
         });
-        send({ type: "auth_url", url: `https://accounts.spotify.com/authorize?${params.toString()}` });
+        send({ type: "auth_url", url: `https://accounts.spotify.com/authorize?${params.toString()}` }, userId);
         break;
       }
       case "disconnect": {
         stopPolling();
         await clearTokens();
         await spindle.theme.clear().catch(() => {});
-        send({ type: "disconnected" });
-        send({ type: "state", playbackState: null, connected: false });
+        send({ type: "disconnected" }, userId);
+        send({ type: "state", playbackState: null, connected: false }, userId);
         break;
       }
       case "play":
@@ -671,42 +680,42 @@ spindle.onFrontendMessage(async (raw, userId) => {
           trackUri: msg.trackUri,
           contextUri: msg.contextUri
         });
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       case "pause":
         await pause();
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       case "next":
         await next();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(userId, true);
         break;
       case "previous":
         await previous();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(userId, true);
         break;
       case "seek":
         await seek(msg.positionMs);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       case "set_volume":
         await setVolume(msg.percent);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       case "toggle_shuffle": {
         const state = await getCurrentPlayback();
         if (state)
           await setShuffle(!state.shuffleState);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       }
       case "set_repeat":
         await setRepeat(msg.mode);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       case "search": {
         const results = await search(msg.query);
-        send({ type: "search_results", results });
+        send({ type: "search_results", results }, userId);
         break;
       }
       case "queue":
@@ -714,12 +723,12 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       case "get_devices": {
         const devices = await getDevices();
-        send({ type: "devices", devices });
+        send({ type: "devices", devices }, userId);
         break;
       }
       case "transfer_playback":
         await transferPlayback(msg.deviceId);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       case "save_lastfm_key": {
         const config = await loadConfig(userId);
@@ -732,7 +741,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           connected: isConnected(),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey
-        });
+        }, userId);
         break;
       }
       case "get_widget_prefs": {
@@ -740,7 +749,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           fallback: { size: 48, shape: "circle", sizeMode: "medium" },
           userId
         });
-        send({ type: "widget_prefs", prefs });
+        send({ type: "widget_prefs", prefs }, userId);
         break;
       }
       case "save_widget_prefs": {
@@ -754,7 +763,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           trackUri: lastState?.trackUri || "",
           lyrics: lyrics?.plainLyrics || null,
           instrumental: !!lyrics?.instrumental
-        });
+        }, userId);
         break;
       }
       case "album_colors": {
@@ -763,7 +772,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
     }
   } catch (err) {
-    send({ type: "error", message: err?.message || "Unknown error" });
+    send({ type: "error", message: err?.message || "Unknown error" }, userId);
   }
 });
 var cachedLyrics = null;
@@ -821,6 +830,9 @@ spindle.commands.register([
 spindle.commands.onInvoked(async (commandId) => {
   if (!isConnected())
     return;
+  const commandUserId = activeUserId2;
+  if (!commandUserId)
+    return;
   try {
     switch (commandId) {
       case "play-pause": {
@@ -830,16 +842,16 @@ spindle.commands.onInvoked(async (commandId) => {
         } else {
           await play({});
         }
-        pushStateAfterCommand();
+        pushStateAfterCommand(commandUserId);
         break;
       }
       case "next-track":
         await next();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(commandUserId, true);
         break;
       case "previous-track":
         await previous();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(commandUserId, true);
         break;
     }
   } catch (err) {
@@ -1388,13 +1400,13 @@ async function getPlaybackSeedState() {
     return null;
   }
 }
-async function playMoodFallback(query, state, council, beforePlay) {
+async function playMoodFallback(query, state, council, userId, beforePlay) {
   const playlists = await searchPlaylists(query, 5);
   if (playlists.length > 0) {
     const best = playlists[0];
     beforePlay?.(`fallback playlist play for "${query}"`);
     await play({ contextUri: best.uri });
-    pushStateAfterCommand();
+    pushStateAfterCommand(userId);
     const prefix = council ? `[Mood fallback "${query}"] ` : "";
     return `${prefix}Now playing playlist "${best.name}" by ${best.owner} after mood discovery could not find enough reliable track matches from "${state.trackName}".`;
   }
@@ -1402,7 +1414,7 @@ async function playMoodFallback(query, state, council, beforePlay) {
   if (tracks.length > 0) {
     beforePlay?.(`fallback track play for "${query}"`);
     await play({ trackUri: tracks[0].uri });
-    pushStateAfterCommand();
+    pushStateAfterCommand(userId);
     const prefix = council ? `[Mood fallback "${query}"] ` : "";
     return `${prefix}Now playing "${tracks[0].name}" by ${tracks[0].artist} after mood discovery fell back to direct Spotify matching.`;
   }
@@ -1428,6 +1440,7 @@ spindle.on("TOOL_INVOCATION", async (payload) => {
   } else if (!activeUserId2) {
     return "Spotify Controls has no active user context for this tool invocation yet. Open the extension once, then try again.";
   }
+  const sessionUserId = activeUserId2;
   if (!isConnected()) {
     await loadTokens();
   }
@@ -1458,7 +1471,7 @@ spindle.on("TOOL_INVOCATION", async (payload) => {
             const best2 = playlists[0];
             guardPlaybackMutation(`playlist play for "${best2.name}"`);
             await play({ contextUri: best2.uri });
-            pushStateAfterCommand();
+            pushStateAfterCommand(sessionUserId);
             const others2 = playlists.slice(1, 5).map((p, i) => `${i + 2}. "${p.name}" by ${p.owner} (${p.trackCount} tracks)`).join(`
 `);
             const prefix2 = council ? `[Matched mood "${query}"] ` : "";
@@ -1474,7 +1487,7 @@ ${others2}` : ""}`;
         const best = results[0];
         guardPlaybackMutation(`track play for "${best.name}"`);
         await play({ trackUri: best.uri });
-        pushStateAfterCommand();
+        pushStateAfterCommand(sessionUserId);
         const others = results.slice(1, 5).map((r, i) => `${i + 2}. "${r.name}" by ${r.artist} (${r.album})`).join(`
 `);
         const prefix = council ? `[Searched for "${query}"] ` : "";
@@ -1499,7 +1512,7 @@ ${others}` : ""}`;
             return `No similar tracks found for "${state.trackName}" by ${state.artistName}.`;
           guardPlaybackMutation(`similar fallback play for "${results[0].name}"`);
           await play({ trackUri: results[0].uri });
-          pushStateAfterCommand();
+          pushStateAfterCommand(sessionUserId);
           return `No Last.fm similarity data \u2014 playing "${results[0].name}" by ${results[0].artist} (more by artist)`;
         }
         const resolved = (await Promise.all(similar.map((c) => resolveOnSpotify(c.name, c.artist)))).filter((r) => r !== null);
@@ -1507,7 +1520,7 @@ ${others}` : ""}`;
           return "Found similar tracks via Last.fm but could not match any on Spotify.";
         guardPlaybackMutation(`similar result play for "${resolved[0].name}"`);
         await play({ trackUri: resolved[0].uri });
-        pushStateAfterCommand();
+        pushStateAfterCommand(sessionUserId);
         const toQueue = resolved.slice(1);
         const queueResults = await Promise.all(toQueue.map(async (track) => {
           try {
@@ -1586,7 +1599,7 @@ ${queued.map((q, i) => `${i + 1}. ${q}`).join(`
         if (moodTags.length === 0) {
           const fallbackQuery = (moodArg?.trim() || extractMoodFromContext(context) || state.artistName).trim();
           spindle.log.info(`[mood_discover] No mood tags found; falling back to Spotify query "${fallbackQuery}"`);
-          return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
+          return playMoodFallback(fallbackQuery, state, council, sessionUserId, guardPlaybackMutation);
         }
         const seedFlavorTags = [...new Set([
           ...extractFlavorTags(trackTags),
@@ -1681,7 +1694,7 @@ ${queued.map((q, i) => `${i + 1}. ${q}`).join(`
           const totalResults = tagResults.reduce((n, r) => n + r.tracks.length, 0);
           const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
           spindle.log.info(`[mood_discover] ${totalResults} raw results but no ranked candidates; falling back to Spotify query "${fallbackQuery}"`);
-          return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
+          return playMoodFallback(fallbackQuery, state, council, sessionUserId, guardPlaybackMutation);
         }
         spindle.log.info(`[mood_discover] Resolving ${candidates.length} candidates on Spotify`);
         const resolved = (await Promise.all(candidates.map((c) => timed(resolveOnSpotify(c.name, c.artist), READ_TIMEOUT, `spotify.search("${c.name}")`).catch((err) => {
@@ -1691,11 +1704,11 @@ ${queued.map((q, i) => `${i + 1}. ${q}`).join(`
         if (resolved.length === 0) {
           const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
           spindle.log.info(`[mood_discover] No Spotify matches for Last.fm candidates; falling back to Spotify query "${fallbackQuery}"`);
-          return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
+          return playMoodFallback(fallbackQuery, state, council, sessionUserId, guardPlaybackMutation);
         }
         guardPlaybackMutation(`mood result play for "${resolved[0].name}"`);
         await timed(play({ trackUri: resolved[0].uri }), WRITE_TIMEOUT, "spotify.play");
-        pushStateAfterCommand();
+        pushStateAfterCommand(sessionUserId);
         const toQueue = resolved.slice(1, 4);
         await rememberMoodDiscoveries(resolved.slice(0, 4));
         if (toQueue.length > 0) {

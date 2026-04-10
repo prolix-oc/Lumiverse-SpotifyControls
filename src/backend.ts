@@ -18,8 +18,8 @@ let pendingOAuth: {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-function send(msg: BackendToFrontend) {
-  spindle.sendToFrontend(msg);
+function send(msg: BackendToFrontend, userId: string) {
+  spindle.sendToFrontend(msg, userId);
 }
 
 async function loadConfig(userId: string): Promise<SpotifyConfig> {
@@ -143,7 +143,9 @@ spindle.permissions.onChanged(({ permission, granted }) => {
     startPolling();
   } else if (!granted) {
     stopPolling();
-    send({ type: "state", playbackState: null, connected: false });
+    if (activeUserId) {
+      send({ type: "state", playbackState: null, connected: false }, activeUserId);
+    }
   }
 });
 
@@ -152,10 +154,12 @@ const POLL_PAUSED_MS = 15000;
 
 function startPolling() {
   stopPolling();
+  if (!activeUserId) return;
   pollingGeneration += 1;
   const generation = pollingGeneration;
-  scheduleNextPoll();
-  void primePlaybackState(generation);
+  const userId = activeUserId;
+  scheduleNextPoll(userId);
+  void primePlaybackState(generation, userId);
 }
 
 /** Tracks consecutive null-state polls so we keep fast-polling through brief
@@ -163,7 +167,7 @@ function startPolling() {
 let nullStateRetries = 0;
 const MAX_NULL_RETRIES = 3;
 
-function scheduleNextPoll() {
+function scheduleNextPoll(userId: string) {
   // Use fast polling when playing, or when state just went null (may be
   // mid-transition on an external device — keep checking quickly).
   const useFastPoll = lastState?.isPlaying || nullStateRetries > 0;
@@ -171,7 +175,7 @@ function scheduleNextPoll() {
 
   pollingInterval = setTimeout(async () => {
     if (!spotify.isConnected()) {
-      scheduleNextPoll();
+      scheduleNextPoll(userId);
       return;
     }
     const previousUri = lastState?.trackUri ?? null;
@@ -185,7 +189,7 @@ function scheduleNextPoll() {
         nullStateRetries = 0;
       }
       cacheState(state);
-      send({ type: "state", playbackState: state, connected: true });
+      send({ type: "state", playbackState: state, connected: true }, userId);
 
       // If the track changed externally, do a quick follow-up fetch so the
       // frontend gets the most settled state (progress, duration, etc.)
@@ -195,7 +199,7 @@ function scheduleNextPoll() {
             const fresh = await spotify.getCurrentPlayback();
             if (fresh) {
               cacheState(fresh);
-              send({ type: "state", playbackState: fresh, connected: true });
+              send({ type: "state", playbackState: fresh, connected: true }, userId);
             }
           } catch {}
         }, 1200);
@@ -203,7 +207,7 @@ function scheduleNextPoll() {
     } catch (err: any) {
       spindle.log.warn(`Polling error: ${err?.message}`);
     }
-    scheduleNextPoll();
+    scheduleNextPoll(userId);
   }, interval);
 }
 
@@ -216,18 +220,18 @@ function stopPolling() {
 }
 
 /** Fetch and push current playback state to the frontend. */
-async function pushStateUpdate(): Promise<PlaybackState | null> {
+async function pushStateUpdate(userId: string): Promise<PlaybackState | null> {
   try {
     const state = await spotify.getCurrentPlayback();
     cacheState(state);
-    send({ type: "state", playbackState: state, connected: true });
+    send({ type: "state", playbackState: state, connected: true }, userId);
     return state;
   } catch {
     return null;
   }
 }
 
-async function primePlaybackState(generation: number): Promise<void> {
+async function primePlaybackState(generation: number, userId: string): Promise<void> {
   const retryDelays = [0, 1000, 3000];
 
   for (const delay of retryDelays) {
@@ -239,7 +243,7 @@ async function primePlaybackState(generation: number): Promise<void> {
       return;
     }
 
-    const state = await pushStateUpdate();
+    const state = await pushStateUpdate(userId);
     if (state) {
       return;
     }
@@ -254,9 +258,9 @@ async function primePlaybackState(generation: number): Promise<void> {
  * retries so we keep fetching until the track URI actually changes — Spotify
  * can take up to a few seconds to reflect a skip.
  */
-function pushStateAfterCommand(expectTrackChange = false) {
+function pushStateAfterCommand(userId: string, expectTrackChange = false) {
   if (!expectTrackChange) {
-    setTimeout(pushStateUpdate, 300);
+    setTimeout(() => pushStateUpdate(userId), 300);
     return;
   }
   const previousUri = lastState?.trackUri ?? null;
@@ -265,7 +269,7 @@ function pushStateAfterCommand(expectTrackChange = false) {
     setTimeout(async () => {
       // If a previous retry already detected the change, skip
       if (lastState?.trackUri !== previousUri) return;
-      await pushStateUpdate();
+      await pushStateUpdate(userId);
     }, delay);
   }
 }
@@ -274,10 +278,13 @@ function pushStateAfterCommand(expectTrackChange = false) {
 
 spindle.oauth.onCallback(async (params) => {
   const { code, state, error } = params;
+  const pendingUserId = pendingOAuth?.userId;
 
   if (error) {
     spindle.log.error(`Spotify OAuth error: ${error}`);
-    send({ type: "error", message: `Spotify authorization denied: ${error}` });
+    if (pendingUserId) {
+      send({ type: "error", message: `Spotify authorization denied: ${error}` }, pendingUserId);
+    }
     return { html: errorPage(`Authorization denied: ${error}`) };
   }
 
@@ -290,14 +297,15 @@ spindle.oauth.onCallback(async (params) => {
 
   try {
     spotify.setActiveUser(oauthUserId);
+    activeUserId = oauthUserId;
     const tokens = await spotify.exchangeCodeForTokens(code, redirectUri, clientId, clientSecret);
     await spotify.saveTokens(tokens);
-    send({ type: "connected" });
+    send({ type: "connected" }, oauthUserId);
     startPolling();
     return { html: successPage() };
   } catch (err: any) {
     spindle.log.error(`OAuth token exchange failed: ${err?.message}`);
-    send({ type: "error", message: `Authentication failed: ${err?.message}` });
+    send({ type: "error", message: `Authentication failed: ${err?.message}` }, oauthUserId);
     return { html: errorPage(err?.message || "Token exchange failed. Please try again.") };
   }
 });
@@ -333,7 +341,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       case "get_state": {
         // Return cached state immediately so the UI populates instantly
         if (lastState && spotify.isConnected()) {
-          send({ type: "state", playbackState: lastState, connected: true });
+          send({ type: "state", playbackState: lastState, connected: true }, userId);
         }
         // Then fetch fresh state
         const playbackState = spotify.isConnected()
@@ -344,7 +352,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           type: "state",
           playbackState,
           connected: spotify.isConnected(),
-        });
+        }, userId);
         break;
       }
 
@@ -357,7 +365,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           connected: spotify.isConnected(),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey,
-        });
+        }, userId);
         break;
       }
 
@@ -382,7 +390,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           state: state,
         });
 
-        send({ type: "auth_url", url: `https://accounts.spotify.com/authorize?${params.toString()}` });
+        send({ type: "auth_url", url: `https://accounts.spotify.com/authorize?${params.toString()}` }, userId);
         break;
       }
 
@@ -390,8 +398,8 @@ spindle.onFrontendMessage(async (raw, userId) => {
         stopPolling();
         await spotify.clearTokens();
         await spindle.theme.clear().catch(() => {});
-        send({ type: "disconnected" });
-        send({ type: "state", playbackState: null, connected: false });
+        send({ type: "disconnected" }, userId);
+        send({ type: "state", playbackState: null, connected: false }, userId);
         break;
       }
 
@@ -400,49 +408,49 @@ spindle.onFrontendMessage(async (raw, userId) => {
           trackUri: msg.trackUri,
           contextUri: msg.contextUri,
         });
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
 
       case "pause":
         await spotify.pause();
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
 
       case "next":
         await spotify.next();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(userId, true);
         break;
 
       case "previous":
         await spotify.previous();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(userId, true);
         break;
 
       case "seek":
         await spotify.seek(msg.positionMs);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
 
       case "set_volume":
         await spotify.setVolume(msg.percent);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
 
       case "toggle_shuffle": {
         const state = await spotify.getCurrentPlayback();
         if (state) await spotify.setShuffle(!state.shuffleState);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
       }
 
       case "set_repeat":
         await spotify.setRepeat(msg.mode);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
 
       case "search": {
         const results = await spotify.search(msg.query);
-        send({ type: "search_results", results });
+        send({ type: "search_results", results }, userId);
         break;
       }
 
@@ -452,13 +460,13 @@ spindle.onFrontendMessage(async (raw, userId) => {
 
       case "get_devices": {
         const devices = await spotify.getDevices();
-        send({ type: "devices", devices });
+        send({ type: "devices", devices }, userId);
         break;
       }
 
       case "transfer_playback":
         await spotify.transferPlayback(msg.deviceId);
-        pushStateAfterCommand();
+        pushStateAfterCommand(userId);
         break;
 
       case "save_lastfm_key": {
@@ -472,7 +480,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           connected: spotify.isConnected(),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey,
-        });
+        }, userId);
         break;
       }
 
@@ -481,7 +489,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           fallback: { size: 48, shape: "circle", sizeMode: "medium" } as WidgetPrefs,
           userId,
         });
-        send({ type: "widget_prefs", prefs });
+        send({ type: "widget_prefs", prefs }, userId);
         break;
       }
 
@@ -497,7 +505,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           trackUri: lastState?.trackUri || "",
           lyrics: lyrics?.plainLyrics || null,
           instrumental: !!lyrics?.instrumental,
-        });
+        }, userId);
         break;
       }
 
@@ -507,7 +515,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
     }
   } catch (err: any) {
-    send({ type: "error", message: err?.message || "Unknown error" });
+    send({ type: "error", message: err?.message || "Unknown error" }, userId);
   }
 });
 
@@ -585,6 +593,8 @@ spindle.commands.register([
 
 spindle.commands.onInvoked(async (commandId) => {
   if (!spotify.isConnected()) return;
+  const commandUserId = activeUserId;
+  if (!commandUserId) return;
   try {
     switch (commandId) {
       case "play-pause": {
@@ -594,16 +604,16 @@ spindle.commands.onInvoked(async (commandId) => {
         } else {
           await spotify.play({});
         }
-        pushStateAfterCommand();
+        pushStateAfterCommand(commandUserId);
         break;
       }
       case "next-track":
         await spotify.next();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(commandUserId, true);
         break;
       case "previous-track":
         await spotify.previous();
-        pushStateAfterCommand(true);
+        pushStateAfterCommand(commandUserId, true);
         break;
     }
   } catch (err: any) {
@@ -1167,6 +1177,7 @@ async function playMoodFallback(
   query: string,
   state: PlaybackState,
   council: boolean,
+  userId: string,
   beforePlay?: (stage: string) => void
 ): Promise<string> {
   const playlists = await spotify.searchPlaylists(query, 5);
@@ -1174,7 +1185,7 @@ async function playMoodFallback(
     const best = playlists[0];
     beforePlay?.(`fallback playlist play for \"${query}\"`);
     await spotify.play({ contextUri: best.uri });
-    pushStateAfterCommand();
+    pushStateAfterCommand(userId);
     const prefix = council ? `[Mood fallback "${query}"] ` : "";
     return `${prefix}Now playing playlist "${best.name}" by ${best.owner} after mood discovery could not find enough reliable track matches from "${state.trackName}".`;
   }
@@ -1183,7 +1194,7 @@ async function playMoodFallback(
   if (tracks.length > 0) {
     beforePlay?.(`fallback track play for \"${query}\"`);
     await spotify.play({ trackUri: tracks[0].uri });
-    pushStateAfterCommand();
+    pushStateAfterCommand(userId);
     const prefix = council ? `[Mood fallback "${query}"] ` : "";
     return `${prefix}Now playing "${tracks[0].name}" by ${tracks[0].artist} after mood discovery fell back to direct Spotify matching.`;
   }
@@ -1219,6 +1230,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
   } else if (!activeUserId) {
     return "Spotify Controls has no active user context for this tool invocation yet. Open the extension once, then try again.";
   }
+  const sessionUserId = activeUserId!;
 
   // Tool invocations may arrive before tokens are loaded in this worker
   // (e.g. after a hot reload). Ensure we have a connected user context.
@@ -1261,7 +1273,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
             const best = playlists[0];
             guardPlaybackMutation(`playlist play for \"${best.name}\"`);
             await spotify.play({ contextUri: best.uri });
-            pushStateAfterCommand();
+            pushStateAfterCommand(sessionUserId);
           const others = playlists.slice(1, 5)
             .map((p, i) => `${i + 2}. "${p.name}" by ${p.owner} (${p.trackCount} tracks)`)
             .join("\n");
@@ -1278,7 +1290,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         const best = results[0];
         guardPlaybackMutation(`track play for \"${best.name}\"`);
         await spotify.play({ trackUri: best.uri });
-        pushStateAfterCommand();
+        pushStateAfterCommand(sessionUserId);
       const others = results.slice(1, 5)
         .map((r, i) => `${i + 2}. "${r.name}" by ${r.artist} (${r.album})`)
         .join("\n");
@@ -1309,7 +1321,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
           if (results.length === 0) return `No similar tracks found for "${state.trackName}" by ${state.artistName}.`;
           guardPlaybackMutation(`similar fallback play for \"${results[0].name}\"`);
           await spotify.play({ trackUri: results[0].uri });
-          pushStateAfterCommand();
+          pushStateAfterCommand(sessionUserId);
         return `No Last.fm similarity data — playing "${results[0].name}" by ${results[0].artist} (more by artist)`;
       }
 
@@ -1323,7 +1335,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         // Play the first track and queue the rest in parallel
         guardPlaybackMutation(`similar result play for \"${resolved[0].name}\"`);
         await spotify.play({ trackUri: resolved[0].uri });
-        pushStateAfterCommand();
+        pushStateAfterCommand(sessionUserId);
 
       const toQueue = resolved.slice(1);
         const queueResults = await Promise.all(
@@ -1411,7 +1423,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (moodTags.length === 0) {
         const fallbackQuery = (moodArg?.trim() || extractMoodFromContext(context) || state.artistName).trim();
         spindle.log.info(`[mood_discover] No mood tags found; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
+        return playMoodFallback(fallbackQuery, state, council, sessionUserId, guardPlaybackMutation);
       }
 
       const seedFlavorTags = [...new Set([
@@ -1521,7 +1533,7 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
         const totalResults = tagResults.reduce((n, r) => n + r.tracks.length, 0);
         const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
         spindle.log.info(`[mood_discover] ${totalResults} raw results but no ranked candidates; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
+        return playMoodFallback(fallbackQuery, state, council, sessionUserId, guardPlaybackMutation);
       }
 
       spindle.log.info(`[mood_discover] Resolving ${candidates.length} candidates on Spotify`);
@@ -1537,12 +1549,12 @@ spindle.on("TOOL_INVOCATION", async (payload: any) => {
       if (resolved.length === 0) {
         const fallbackQuery = (moodArg?.trim() || queryTags.join(" ") || state.artistName).trim();
         spindle.log.info(`[mood_discover] No Spotify matches for Last.fm candidates; falling back to Spotify query "${fallbackQuery}"`);
-        return playMoodFallback(fallbackQuery, state, council, guardPlaybackMutation);
+        return playMoodFallback(fallbackQuery, state, council, sessionUserId, guardPlaybackMutation);
       }
 
       guardPlaybackMutation(`mood result play for \"${resolved[0].name}\"`);
       await timed(spotify.play({ trackUri: resolved[0].uri }), WRITE_TIMEOUT, "spotify.play");
-      pushStateAfterCommand();
+      pushStateAfterCommand(sessionUserId);
 
       // Queue remaining in the background so discovery returns quickly even on
       // slower connections.
