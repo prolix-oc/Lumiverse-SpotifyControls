@@ -233,6 +233,8 @@ export function setup(ctx: SpindleFrontendContext) {
 
   const panel = document.createElement("div");
   panel.className = "spotify-panel";
+  tab.root.style.display = "flex";
+  tab.root.style.minHeight = "0";
   tab.root.appendChild(panel);
 
   // Create UI sections (no settings here — it's in the settings mount)
@@ -241,7 +243,9 @@ export function setup(ctx: SpindleFrontendContext) {
   });
   const controlsUI = createControlsUI(sendToBackend);
   const searchUI = createSearchUI(sendToBackend);
-  const lyricsUI = createLyricsUI();
+  const lyricsUI = createLyricsUI((positionMs) => {
+    sendToBackend({ type: "seek", positionMs });
+  });
 
   panel.appendChild(nowPlayingUI.root);
   panel.appendChild(controlsUI.root);

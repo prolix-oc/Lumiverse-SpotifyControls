@@ -52,7 +52,7 @@ function parseSyncedLyrics(value: string | null): Array<{ timeMs: number; text: 
   return parsed.sort((a, b) => a.timeMs - b.timeMs);
 }
 
-export function createLyricsUI(): LyricsUI {
+export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
 
@@ -151,6 +151,7 @@ export function createLyricsUI(): LyricsUI {
       const el = document.createElement("div");
       el.className = `spotify-lyrics-line${line.text ? " spotify-lyrics-line-future" : " spotify-lyrics-line-blank spotify-lyrics-line-future"}`;
       el.textContent = line.text || " ";
+      el.addEventListener("click", () => onSeek?.(line.timeMs));
       body.appendChild(el);
       return { ...line, el };
     });

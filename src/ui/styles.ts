@@ -4,9 +4,12 @@ export const PANEL_CSS = `
   flex-direction: column;
   gap: 16px;
   padding: 12px;
+  flex: 1;
   height: 100%;
+  max-height: 100%;
   min-height: 0;
   box-sizing: border-box;
+  overflow: hidden;
   font-family: system-ui, -apple-system, sans-serif;
   color: var(--lumiverse-text);
 }
@@ -860,6 +863,7 @@ export const PANEL_CSS = `
 }
 
 .spotify-lyrics-has-content {
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -903,7 +907,12 @@ export const PANEL_CSS = `
   text-align: center;
   border-radius: 12px;
   transform: scale(0.96);
+  cursor: pointer;
   transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.spotify-lyrics-line:hover {
+  background: var(--lumiverse-fill-subtle);
 }
 
 .spotify-lyrics-line-active {

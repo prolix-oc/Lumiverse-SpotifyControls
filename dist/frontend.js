@@ -5,9 +5,12 @@ var PANEL_CSS = `
   flex-direction: column;
   gap: 16px;
   padding: 12px;
+  flex: 1;
   height: 100%;
+  max-height: 100%;
   min-height: 0;
   box-sizing: border-box;
+  overflow: hidden;
   font-family: system-ui, -apple-system, sans-serif;
   color: var(--lumiverse-text);
 }
@@ -861,6 +864,7 @@ var PANEL_CSS = `
 }
 
 .spotify-lyrics-has-content {
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -904,7 +908,12 @@ var PANEL_CSS = `
   text-align: center;
   border-radius: 12px;
   transform: scale(0.96);
+  cursor: pointer;
   transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.spotify-lyrics-line:hover {
+  background: var(--lumiverse-fill-subtle);
 }
 
 .spotify-lyrics-line-active {
@@ -1970,7 +1979,7 @@ function parseSyncedLyrics(value) {
   }
   return parsed.sort((a, b) => a.timeMs - b.timeMs);
 }
-function createLyricsUI() {
+function createLyricsUI(onSeek) {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
   const title = document.createElement("h3");
@@ -2064,6 +2073,7 @@ function createLyricsUI() {
       const el = document.createElement("div");
       el.className = `spotify-lyrics-line${line.text ? " spotify-lyrics-line-future" : " spotify-lyrics-line-blank spotify-lyrics-line-future"}`;
       el.textContent = line.text || " ";
+      el.addEventListener("click", () => onSeek?.(line.timeMs));
       body.appendChild(el);
       return { ...line, el };
     });
@@ -2337,13 +2347,17 @@ function setup(ctx) {
   cleanups.push(() => tab.destroy());
   const panel = document.createElement("div");
   panel.className = "spotify-panel";
+  tab.root.style.display = "flex";
+  tab.root.style.minHeight = "0";
   tab.root.appendChild(panel);
   const nowPlayingUI = createNowPlayingUI((positionMs) => {
     sendToBackend({ type: "seek", positionMs });
   });
   const controlsUI = createControlsUI(sendToBackend);
   const searchUI = createSearchUI(sendToBackend);
-  const lyricsUI = createLyricsUI();
+  const lyricsUI = createLyricsUI((positionMs) => {
+    sendToBackend({ type: "seek", positionMs });
+  });
   panel.appendChild(nowPlayingUI.root);
   panel.appendChild(controlsUI.root);
   panel.appendChild(searchUI.root);
