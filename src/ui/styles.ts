@@ -4,6 +4,9 @@ export const PANEL_CSS = `
   flex-direction: column;
   gap: 16px;
   padding: 12px;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   font-family: system-ui, -apple-system, sans-serif;
   color: var(--lumiverse-text);
 }
@@ -852,15 +855,19 @@ export const PANEL_CSS = `
 .spotify-lyrics-body {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 48px;
 }
 
 .spotify-lyrics-has-content {
-  max-height: 400px;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
   position: relative;
+  padding-bottom: 112px;
+  scroll-padding-bottom: 112px;
+  box-sizing: border-box;
   -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 48px), transparent 100%);
   mask-image: linear-gradient(to bottom, black calc(100% - 48px), transparent 100%);
 }
