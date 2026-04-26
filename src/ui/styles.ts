@@ -3,8 +3,10 @@ export const PANEL_CSS = `
   display: flex;
   width: 100%;
   height: var(--spotify-tab-height, 100%);
+  max-height: var(--spotify-tab-height, 100%);
   min-height: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .spotify-panel {
@@ -24,6 +26,7 @@ export const PANEL_CSS = `
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .spotify-section-title {
@@ -873,6 +876,7 @@ export const PANEL_CSS = `
 .spotify-lyrics-has-content {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
   position: relative;

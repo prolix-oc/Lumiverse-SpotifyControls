@@ -4,8 +4,10 @@ var PANEL_CSS = `
   display: flex;
   width: 100%;
   height: var(--spotify-tab-height, 100%);
+  max-height: var(--spotify-tab-height, 100%);
   min-height: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .spotify-panel {
@@ -25,6 +27,7 @@ var PANEL_CSS = `
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .spotify-section-title {
@@ -874,6 +877,7 @@ var PANEL_CSS = `
 .spotify-lyrics-has-content {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
   position: relative;
@@ -2358,7 +2362,10 @@ function setup(ctx) {
   tab.root.appendChild(panel);
   function updateTabHeight() {
     const top = tab.root.getBoundingClientRect().top;
-    tab.root.style.setProperty("--spotify-tab-height", `${Math.max(240, window.innerHeight - top)}px`);
+    const parentBottom = tab.root.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight;
+    const viewportBottom = window.visualViewport?.height ?? window.innerHeight;
+    const bottom = Math.min(parentBottom, viewportBottom);
+    tab.root.style.setProperty("--spotify-tab-height", `${Math.max(240, bottom - top - 2)}px`);
   }
   updateTabHeight();
   const tabHeightObserver = new ResizeObserver(updateTabHeight);
