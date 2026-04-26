@@ -1,21 +1,19 @@
 // src/ui/styles.ts
 var PANEL_CSS = `
 .spotify-tab-root {
-  position: relative;
-  flex: 1 1 auto;
-  align-self: stretch;
+  display: flex;
   width: 100%;
+  height: var(--spotify-tab-height, 100%);
   min-height: 0;
   overflow: hidden;
 }
 
 .spotify-panel {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 12px 12px 0;
+  flex: 1 1 auto;
   min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
@@ -2358,6 +2356,18 @@ function setup(ctx) {
   panel.className = "spotify-panel";
   tab.root.classList.add("spotify-tab-root");
   tab.root.appendChild(panel);
+  function updateTabHeight() {
+    const top = tab.root.getBoundingClientRect().top;
+    tab.root.style.setProperty("--spotify-tab-height", `${Math.max(240, window.innerHeight - top)}px`);
+  }
+  updateTabHeight();
+  const tabHeightObserver = new ResizeObserver(updateTabHeight);
+  tabHeightObserver.observe(tab.root);
+  window.addEventListener("resize", updateTabHeight);
+  cleanups.push(() => {
+    tabHeightObserver.disconnect();
+    window.removeEventListener("resize", updateTabHeight);
+  });
   const nowPlayingUI = createNowPlayingUI((positionMs) => {
     sendToBackend({ type: "seek", positionMs });
   });

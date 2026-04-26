@@ -236,6 +236,19 @@ export function setup(ctx: SpindleFrontendContext) {
   tab.root.classList.add("spotify-tab-root");
   tab.root.appendChild(panel);
 
+  function updateTabHeight() {
+    const top = tab.root.getBoundingClientRect().top;
+    tab.root.style.setProperty("--spotify-tab-height", `${Math.max(240, window.innerHeight - top)}px`);
+  }
+  updateTabHeight();
+  const tabHeightObserver = new ResizeObserver(updateTabHeight);
+  tabHeightObserver.observe(tab.root);
+  window.addEventListener("resize", updateTabHeight);
+  cleanups.push(() => {
+    tabHeightObserver.disconnect();
+    window.removeEventListener("resize", updateTabHeight);
+  });
+
   // Create UI sections (no settings here — it's in the settings mount)
   const nowPlayingUI = createNowPlayingUI((positionMs) => {
     sendToBackend({ type: "seek", positionMs });
