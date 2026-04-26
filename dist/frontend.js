@@ -1,10 +1,17 @@
 // src/ui/styles.ts
 var PANEL_CSS = `
+.spotify-tab-root {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .spotify-panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 12px;
+  padding: 12px 12px 0;
   flex: 1;
   height: 100%;
   max-height: 100%;
@@ -853,18 +860,19 @@ var PANEL_CSS = `
 /* Lyrics */
 .spotify-lyrics-section {
   min-height: 0;
-  flex: 1;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .spotify-lyrics-body {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 48px;
+  overflow: hidden;
 }
 
 .spotify-lyrics-has-content {
-  height: 100%;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -2347,8 +2355,7 @@ function setup(ctx) {
   cleanups.push(() => tab.destroy());
   const panel = document.createElement("div");
   panel.className = "spotify-panel";
-  tab.root.style.display = "flex";
-  tab.root.style.minHeight = "0";
+  tab.root.classList.add("spotify-tab-root");
   tab.root.appendChild(panel);
   const nowPlayingUI = createNowPlayingUI((positionMs) => {
     sendToBackend({ type: "seek", positionMs });

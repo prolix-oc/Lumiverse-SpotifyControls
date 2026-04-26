@@ -233,8 +233,7 @@ export function setup(ctx: SpindleFrontendContext) {
 
   const panel = document.createElement("div");
   panel.className = "spotify-panel";
-  tab.root.style.display = "flex";
-  tab.root.style.minHeight = "0";
+  tab.root.classList.add("spotify-tab-root");
   tab.root.appendChild(panel);
 
   // Create UI sections (no settings here — it's in the settings mount)
