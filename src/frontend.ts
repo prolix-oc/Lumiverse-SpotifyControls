@@ -64,14 +64,12 @@ export function setup(ctx: SpindleFrontendContext) {
     savePositionTimer = setTimeout(saveWidgetPrefs, 500);
   }
 
-  // Server base URL helper — Spotify rejects "localhost" in redirect URIs;
-  // use the IPv4 loopback 127.0.0.1 instead for local development.
+  // Use a loopback redirect URI so Spotify app setup does not depend on the
+  // browser origin (LAN IP, cloud hostname, phone, etc.). Non-origin clients can
+  // paste the failed loopback callback URL back into settings to finish auth.
   function getServerBaseUrl(): string {
-    const origin = window.location.origin;
-    if (new URL(origin).hostname === "localhost") {
-      return origin.replace("://localhost", "://127.0.0.1");
-    }
-    return origin;
+    const { port } = window.location;
+    return `http://127.0.0.1${port ? `:${port}` : ""}`;
   }
 
   // Send helper
@@ -542,6 +540,7 @@ export function setup(ctx: SpindleFrontendContext) {
         nowPlayingUI.update(currentState, connected);
         controlsUI.update(currentState, connected);
         miniPlayer.update(currentState, connected);
+        lyricsUI.updatePlayback(currentState);
         updateWidget(currentState);
         scheduleTrackEndRefresh(currentState);
         // Extract album art colors for theme when art changes
@@ -649,11 +648,14 @@ export function setup(ctx: SpindleFrontendContext) {
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
         miniPlayer.update(null, false);
+        lyricsUI.clear();
         updateWidget(null);
         break;
 
       case "lyrics":
-        lyricsUI.update(msg.trackUri, msg.lyrics, msg.instrumental);
+        if (msg.trackUri && msg.trackUri !== lastLyricsTrackUri) break;
+        lyricsUI.update(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
+        lyricsUI.updatePlayback(currentState);
         break;
 
       case "error":

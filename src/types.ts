@@ -3,7 +3,8 @@
 export type FrontendToBackend =
   | { type: "get_state" }
   | { type: "get_config" }
-  | { type: "connect"; clientId: string; clientSecret: string; serverBaseUrl: string }
+  | { type: "connect"; clientId: string; clientSecret?: string; serverBaseUrl: string }
+  | { type: "complete_auth_callback"; callbackUrl: string }
   | { type: "disconnect" }
   | { type: "play"; trackUri?: string; contextUri?: string }
   | { type: "pause" }
@@ -34,7 +35,7 @@ export type BackendToFrontend =
   | { type: "disconnected" }
   | { type: "devices"; devices: DeviceInfo[] }
   | { type: "widget_prefs"; prefs: WidgetPrefs }
-  | { type: "lyrics"; trackUri: string; lyrics: string | null; instrumental: boolean }
+  | { type: "lyrics"; trackUri: string; plainLyrics: string | null; syncedLyrics: string | null; instrumental: boolean }
   | { type: "error"; message: string };
 
 // ─── Shared interfaces ──────────────────────────────────────────────────
@@ -107,5 +108,5 @@ export interface TokenData {
   refresh_token: string;
   expires_at: number;
   client_id: string;
-  client_secret: string;
+  client_secret?: string;
 }

@@ -882,4 +882,40 @@ export const PANEL_CSS = `
   padding: 8px 0;
 }
 
+.spotify-lyrics-synced {
+  gap: 4px;
+  scroll-behavior: smooth;
+}
+
+.spotify-lyrics-line {
+  min-height: 1.8em;
+  padding: 2px 14px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--lumiverse-text-dim);
+  text-align: center;
+  border-radius: 12px;
+  transform: scale(0.96);
+  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.spotify-lyrics-line-active {
+  color: var(--lumiverse-text);
+  background: var(--lumiverse-fill-subtle);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.spotify-lyrics-line-past {
+  opacity: 0.45;
+}
+
+.spotify-lyrics-line-future {
+  opacity: 0.7;
+}
+
+.spotify-lyrics-line-blank {
+  opacity: 0.25;
+}
+
 `;

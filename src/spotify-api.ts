@@ -47,6 +47,16 @@ function basicAuthHeader(clientId: string, clientSecret: string): string {
   return "Basic " + btoa(`${clientId}:${clientSecret}`);
 }
 
+function tokenAuthHeaders(clientId: string, clientSecret?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  if (clientSecret) {
+    headers.Authorization = basicAuthHeader(clientId, clientSecret);
+  }
+  return headers;
+}
+
 function formatSpotifyAuthError(action: string, status: number, body: string): string {
   if (!body) return `${action} failed (${status})`;
 
@@ -76,15 +86,15 @@ async function refreshAccessToken(): Promise<string> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: tokenData.refresh_token,
-  }).toString();
+  });
+  if (!tokenData.client_secret) {
+    body.set("client_id", tokenData.client_id);
+  }
 
   const res = (await spindle.cors(SPOTIFY_TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: basicAuthHeader(tokenData.client_id, tokenData.client_secret),
-    },
-    body,
+    headers: tokenAuthHeaders(tokenData.client_id, tokenData.client_secret),
+    body: body.toString(),
   })) as { status: number; body: string };
 
   if (res.status !== 200) {
@@ -516,21 +526,23 @@ export async function exchangeCodeForTokens(
   code: string,
   redirectUri: string,
   clientId: string,
-  clientSecret: string
+  clientSecret?: string,
+  codeVerifier?: string
 ): Promise<TokenData> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
     redirect_uri: redirectUri,
-  }).toString();
+  });
+  if (codeVerifier) {
+    body.set("client_id", clientId);
+    body.set("code_verifier", codeVerifier);
+  }
 
   const res = (await spindle.cors(SPOTIFY_TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: basicAuthHeader(clientId, clientSecret),
-    },
-    body,
+    headers: tokenAuthHeaders(clientId, codeVerifier ? undefined : clientSecret),
+    body: body.toString(),
   })) as { status: number; body: string };
 
   if (res.status !== 200) {
@@ -543,6 +555,6 @@ export async function exchangeCodeForTokens(
     refresh_token: json.refresh_token,
     expires_at: Date.now() + json.expires_in * 1000 - 60_000,
     client_id: clientId,
-    client_secret: clientSecret,
+    client_secret: clientSecret || undefined,
   };
 }

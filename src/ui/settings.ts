@@ -42,12 +42,12 @@ export function createSettingsUI(
   // Client Secret
   const secretLabel = document.createElement("label");
   secretLabel.className = "spotify-settings-label";
-  secretLabel.textContent = "Client Secret";
+  secretLabel.textContent = "Client Secret (optional)";
 
   const secretInput = document.createElement("input");
   secretInput.className = "spotify-input";
   secretInput.type = "password";
-  secretInput.placeholder = "Spotify Client Secret";
+  secretInput.placeholder = "Optional for PKCE apps";
   secretLabel.appendChild(secretInput);
 
   // Last.fm API Key
@@ -115,8 +115,38 @@ export function createSettingsUI(
 
   const callbackHint = document.createElement("div");
   callbackHint.style.cssText = "font-size:0.8em;opacity:0.6;margin-top:2px";
-  callbackHint.textContent = "Add this as a Redirect URI in your Spotify app settings.";
+  callbackHint.textContent = "Add this loopback URL in Spotify. If it fails on another device, paste the failed callback URL below.";
   callbackLabel.appendChild(callbackHint);
+
+  const forwardLabel = document.createElement("label");
+  forwardLabel.className = "spotify-settings-label";
+  forwardLabel.textContent = "Finish from another device";
+
+  const forwardRow = document.createElement("div");
+  forwardRow.className = "spotify-settings-row";
+  forwardRow.style.gap = "6px";
+
+  const forwardInput = document.createElement("input");
+  forwardInput.className = "spotify-input";
+  forwardInput.type = "text";
+  forwardInput.placeholder = "Paste the 127.0.0.1 callback URL here";
+  forwardInput.style.flex = "1";
+
+  const forwardBtn = document.createElement("button");
+  forwardBtn.className = "spotify-btn spotify-btn-primary";
+  forwardBtn.textContent = "Finish";
+  forwardBtn.style.fontSize = "0.85em";
+  forwardBtn.style.padding = "4px 12px";
+  forwardBtn.style.flexShrink = "0";
+  forwardBtn.addEventListener("click", () => {
+    const callbackUrl = forwardInput.value.trim();
+    if (!callbackUrl) return;
+    sendToBackend({ type: "complete_auth_callback", callbackUrl });
+  });
+
+  forwardRow.appendChild(forwardInput);
+  forwardRow.appendChild(forwardBtn);
+  forwardLabel.appendChild(forwardRow);
 
   // Actions row
   const btnRow = document.createElement("div");
@@ -131,6 +161,7 @@ export function createSettingsUI(
   body.appendChild(idLabel);
   body.appendChild(secretLabel);
   body.appendChild(callbackLabel);
+  body.appendChild(forwardLabel);
   body.appendChild(lastfmLabel);
   body.appendChild(lastfmRow);
   body.appendChild(btnRow);
@@ -167,7 +198,7 @@ export function createSettingsUI(
       if (hasSecret) {
         secretInput.placeholder = "Saved (re-enter to change)";
       } else {
-        secretInput.placeholder = "Spotify Client Secret";
+        secretInput.placeholder = "Optional for PKCE apps";
       }
       btn.textContent = "Connect";
       btn.className = "spotify-btn spotify-btn-primary";
@@ -200,15 +231,11 @@ export function createSettingsUI(
         statusEl.innerHTML = '<span class="spotify-status-dot disconnected"></span><span style="color:#e74c3c">Client ID is required</span>';
         return;
       }
-      if (!clientSecret) {
-        statusEl.innerHTML = '<span class="spotify-status-dot disconnected"></span><span style="color:#e74c3c">Client Secret is required</span>';
-        return;
-      }
       setConnecting();
       sendToBackend({
         type: "connect",
         clientId,
-        clientSecret,
+        clientSecret: clientSecret || undefined,
         serverBaseUrl: getServerBaseUrl(),
       });
     }

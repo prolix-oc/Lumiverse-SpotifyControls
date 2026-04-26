@@ -29,6 +29,15 @@ function isConnected() {
 function basicAuthHeader(clientId, clientSecret) {
   return "Basic " + btoa(`${clientId}:${clientSecret}`);
 }
+function tokenAuthHeaders(clientId, clientSecret) {
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded"
+  };
+  if (clientSecret) {
+    headers.Authorization = basicAuthHeader(clientId, clientSecret);
+  }
+  return headers;
+}
 function formatSpotifyAuthError(action, status, body) {
   if (!body)
     return `${action} failed (${status})`;
@@ -46,14 +55,14 @@ async function refreshAccessToken() {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: tokenData.refresh_token
-  }).toString();
+  });
+  if (!tokenData.client_secret) {
+    body.set("client_id", tokenData.client_id);
+  }
   const res = await spindle.cors(SPOTIFY_TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: basicAuthHeader(tokenData.client_id, tokenData.client_secret)
-    },
-    body
+    headers: tokenAuthHeaders(tokenData.client_id, tokenData.client_secret),
+    body: body.toString()
   });
   if (res.status !== 200) {
     throw new Error(formatSpotifyAuthError("Token refresh", res.status, res.body || ""));
@@ -337,19 +346,20 @@ async function getArtistTopTags(artist) {
     count: parseInt(t.count) || 0
   })).filter((t) => t.count > 0);
 }
-async function exchangeCodeForTokens(code, redirectUri, clientId, clientSecret) {
+async function exchangeCodeForTokens(code, redirectUri, clientId, clientSecret, codeVerifier) {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
     redirect_uri: redirectUri
-  }).toString();
+  });
+  if (codeVerifier) {
+    body.set("client_id", clientId);
+    body.set("code_verifier", codeVerifier);
+  }
   const res = await spindle.cors(SPOTIFY_TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: basicAuthHeader(clientId, clientSecret)
-    },
-    body
+    headers: tokenAuthHeaders(clientId, codeVerifier ? undefined : clientSecret),
+    body: body.toString()
   });
   if (res.status !== 200) {
     throw new Error(formatSpotifyAuthError("Token exchange", res.status, res.body || ""));
@@ -360,7 +370,7 @@ async function exchangeCodeForTokens(code, redirectUri, clientId, clientSecret) 
     refresh_token: json.refresh_token,
     expires_at: Date.now() + json.expires_in * 1000 - 60000,
     client_id: clientId,
-    client_secret: clientSecret
+    client_secret: clientSecret || undefined
   };
 }
 
@@ -389,9 +399,30 @@ async function loadConfig(userId) {
 async function saveConfig(config, userId) {
   await spindle.storage.setJson("config.json", { clientId: config.clientId });
   await Promise.all([
-    config.clientSecret ? spindle.enclave.put("client_secret", config.clientSecret, userId) : Promise.resolve(),
+    config.clientSecret ? spindle.enclave.put("client_secret", config.clientSecret, userId) : spindle.enclave.delete("client_secret", userId),
     config.lastfmApiKey ? spindle.enclave.put("lastfm_api_key", config.lastfmApiKey, userId) : Promise.resolve()
   ]);
+}
+function base64UrlEncode(bytes) {
+  let binary = "";
+  for (const byte of bytes)
+    binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function createCodeVerifier() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+async function createCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+function getLoopbackRedirectUri(serverBaseUrl) {
+  const url = new URL(serverBaseUrl);
+  url.hostname = "127.0.0.1";
+  return url.origin + spindle.oauth.getCallbackUrl();
 }
 var MIGRATION_FLAG = "enclave_migration_done.json";
 async function migrateToEnclave(userId) {
@@ -571,7 +602,7 @@ function pushStateAfterCommand(userId, expectTrackChange = false) {
     }, delay);
   }
 }
-spindle.oauth.onCallback(async (params) => {
+async function completeOAuthCallback(params) {
   const { code, state, error } = params;
   const pendingUserId = pendingOAuth?.userId;
   if (error) {
@@ -581,15 +612,18 @@ spindle.oauth.onCallback(async (params) => {
     }
     return { html: errorPage(`Authorization denied: ${error}`) };
   }
+  if (!code) {
+    return { html: errorPage("OAuth callback did not include an authorization code.") };
+  }
   if (!pendingOAuth || state !== pendingOAuth.state) {
     return { html: errorPage("Invalid or expired OAuth state. Please try connecting again.") };
   }
-  const { redirectUri, clientId, clientSecret, userId: oauthUserId } = pendingOAuth;
+  const { redirectUri, clientId, clientSecret, codeVerifier, userId: oauthUserId } = pendingOAuth;
   pendingOAuth = null;
   try {
     setActiveUser(oauthUserId);
     activeUserId2 = oauthUserId;
-    const tokens = await exchangeCodeForTokens(code, redirectUri, clientId, clientSecret);
+    const tokens = await exchangeCodeForTokens(code, redirectUri, clientId, clientSecret, codeVerifier);
     await saveTokens(tokens);
     send({ type: "connected" }, oauthUserId);
     startPolling();
@@ -599,6 +633,19 @@ spindle.oauth.onCallback(async (params) => {
     send({ type: "error", message: `Authentication failed: ${err?.message}` }, oauthUserId);
     return { html: errorPage(err?.message || "Token exchange failed. Please try again.") };
   }
+}
+function parseCallbackUrl(value) {
+  const trimmed = value.trim();
+  const query = trimmed.includes("?") ? trimmed.slice(trimmed.indexOf("?") + 1) : trimmed;
+  const params = new URLSearchParams(query);
+  const result = {};
+  for (const [key, paramValue] of params) {
+    result[key] = paramValue;
+  }
+  return result;
+}
+spindle.oauth.onCallback(async (params) => {
+  return completeOAuthCallback(params);
 });
 function successPage() {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Spotify Connected</title>
@@ -651,20 +698,30 @@ spindle.onFrontendMessage(async (raw, userId) => {
       case "connect": {
         const { clientId, clientSecret, serverBaseUrl } = msg;
         const existing = await loadConfig(userId);
-        await saveConfig({ clientId, clientSecret, lastfmApiKey: existing.lastfmApiKey }, userId);
+        await saveConfig({ clientId, clientSecret: clientSecret || "", lastfmApiKey: existing.lastfmApiKey }, userId);
         const state = await spindle.oauth.createState();
-        const baseUrl = serverBaseUrl.replace("://localhost", "://127.0.0.1");
-        const redirectUri = baseUrl + spindle.oauth.getCallbackUrl();
-        pendingOAuth = { state, redirectUri, clientId, clientSecret, userId };
+        const codeVerifier = createCodeVerifier();
+        const codeChallenge = await createCodeChallenge(codeVerifier);
+        const redirectUri = getLoopbackRedirectUri(serverBaseUrl);
+        pendingOAuth = { state, redirectUri, clientId, clientSecret: clientSecret || undefined, codeVerifier, userId };
         const scopes = "user-read-playback-state user-modify-playback-state user-read-currently-playing";
         const params = new URLSearchParams({
           response_type: "code",
           client_id: clientId,
           scope: scopes,
           redirect_uri: redirectUri,
-          state
+          state,
+          code_challenge_method: "S256",
+          code_challenge: codeChallenge
         });
         send({ type: "auth_url", url: `https://accounts.spotify.com/authorize?${params.toString()}` }, userId);
+        break;
+      }
+      case "complete_auth_callback": {
+        const result = await completeOAuthCallback(parseCallbackUrl(msg.callbackUrl));
+        if (result?.html?.includes("Connection Failed")) {
+          send({ type: "error", message: "Could not complete Spotify authorization from that callback URL." }, userId);
+        }
         break;
       }
       case "disconnect": {
@@ -757,11 +814,13 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       }
       case "get_lyrics": {
+        const trackUri = lastState?.trackUri || "";
         const lyrics = await getLyricsForCurrentTrack();
         send({
           type: "lyrics",
-          trackUri: lastState?.trackUri || "",
-          lyrics: lyrics?.plainLyrics || null,
+          trackUri,
+          plainLyrics: lyrics?.plainLyrics || null,
+          syncedLyrics: lyrics?.syncedLyrics || null,
           instrumental: !!lyrics?.instrumental
         }, userId);
         break;

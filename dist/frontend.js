@@ -883,6 +883,42 @@ var PANEL_CSS = `
   padding: 8px 0;
 }
 
+.spotify-lyrics-synced {
+  gap: 4px;
+  scroll-behavior: smooth;
+}
+
+.spotify-lyrics-line {
+  min-height: 1.8em;
+  padding: 2px 14px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--lumiverse-text-dim);
+  text-align: center;
+  border-radius: 12px;
+  transform: scale(0.96);
+  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.spotify-lyrics-line-active {
+  color: var(--lumiverse-text);
+  background: var(--lumiverse-fill-subtle);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.spotify-lyrics-line-past {
+  opacity: 0.45;
+}
+
+.spotify-lyrics-line-future {
+  opacity: 0.7;
+}
+
+.spotify-lyrics-line-blank {
+  opacity: 0.25;
+}
+
 `;
 
 // src/ui/settings.ts
@@ -909,11 +945,11 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
   idLabel.appendChild(idInput);
   const secretLabel = document.createElement("label");
   secretLabel.className = "spotify-settings-label";
-  secretLabel.textContent = "Client Secret";
+  secretLabel.textContent = "Client Secret (optional)";
   const secretInput = document.createElement("input");
   secretInput.className = "spotify-input";
   secretInput.type = "password";
-  secretInput.placeholder = "Spotify Client Secret";
+  secretInput.placeholder = "Optional for PKCE apps";
   secretLabel.appendChild(secretInput);
   const lastfmLabel = document.createElement("label");
   lastfmLabel.className = "spotify-settings-label";
@@ -973,8 +1009,34 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
   callbackLabel.appendChild(callbackRow);
   const callbackHint = document.createElement("div");
   callbackHint.style.cssText = "font-size:0.8em;opacity:0.6;margin-top:2px";
-  callbackHint.textContent = "Add this as a Redirect URI in your Spotify app settings.";
+  callbackHint.textContent = "Add this loopback URL in Spotify. If it fails on another device, paste the failed callback URL below.";
   callbackLabel.appendChild(callbackHint);
+  const forwardLabel = document.createElement("label");
+  forwardLabel.className = "spotify-settings-label";
+  forwardLabel.textContent = "Finish from another device";
+  const forwardRow = document.createElement("div");
+  forwardRow.className = "spotify-settings-row";
+  forwardRow.style.gap = "6px";
+  const forwardInput = document.createElement("input");
+  forwardInput.className = "spotify-input";
+  forwardInput.type = "text";
+  forwardInput.placeholder = "Paste the 127.0.0.1 callback URL here";
+  forwardInput.style.flex = "1";
+  const forwardBtn = document.createElement("button");
+  forwardBtn.className = "spotify-btn spotify-btn-primary";
+  forwardBtn.textContent = "Finish";
+  forwardBtn.style.fontSize = "0.85em";
+  forwardBtn.style.padding = "4px 12px";
+  forwardBtn.style.flexShrink = "0";
+  forwardBtn.addEventListener("click", () => {
+    const callbackUrl = forwardInput.value.trim();
+    if (!callbackUrl)
+      return;
+    sendToBackend({ type: "complete_auth_callback", callbackUrl });
+  });
+  forwardRow.appendChild(forwardInput);
+  forwardRow.appendChild(forwardBtn);
+  forwardLabel.appendChild(forwardRow);
   const btnRow = document.createElement("div");
   btnRow.className = "spotify-settings-row";
   const btn = document.createElement("button");
@@ -984,6 +1046,7 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
   body.appendChild(idLabel);
   body.appendChild(secretLabel);
   body.appendChild(callbackLabel);
+  body.appendChild(forwardLabel);
   body.appendChild(lastfmLabel);
   body.appendChild(lastfmRow);
   body.appendChild(btnRow);
@@ -1014,7 +1077,7 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
       if (hasSecret) {
         secretInput.placeholder = "Saved (re-enter to change)";
       } else {
-        secretInput.placeholder = "Spotify Client Secret";
+        secretInput.placeholder = "Optional for PKCE apps";
       }
       btn.textContent = "Connect";
       btn.className = "spotify-btn spotify-btn-primary";
@@ -1044,15 +1107,11 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
         statusEl.innerHTML = '<span class="spotify-status-dot disconnected"></span><span style="color:#e74c3c">Client ID is required</span>';
         return;
       }
-      if (!clientSecret) {
-        statusEl.innerHTML = '<span class="spotify-status-dot disconnected"></span><span style="color:#e74c3c">Client Secret is required</span>';
-        return;
-      }
       setConnecting();
       sendToBackend({
         type: "connect",
         clientId,
-        clientSecret,
+        clientSecret: clientSecret || undefined,
         serverBaseUrl: getServerBaseUrl()
       });
     }
@@ -1879,6 +1938,31 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
 }
 
 // src/ui/lyrics.ts
+function parseTimestamp(raw) {
+  const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
+  if (!match)
+    return null;
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  const fraction = match[3] ? Number(match[3].padEnd(3, "0")) : 0;
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59)
+    return null;
+  return minutes * 60000 + seconds * 1000 + fraction;
+}
+function parseSyncedLyrics(value) {
+  if (!value)
+    return [];
+  const parsed = [];
+  for (const line of value.split(/\r?\n/)) {
+    const timestamps = [...line.matchAll(/\[([^\]]+)\]/g)].map((match) => parseTimestamp(match[1])).filter((timeMs) => timeMs !== null);
+    if (timestamps.length === 0)
+      continue;
+    const text = line.replace(/(?:\[[^\]]+\])+/g, "").trim();
+    for (const timeMs of timestamps)
+      parsed.push({ timeMs, text });
+  }
+  return parsed.sort((a, b) => a.timeMs - b.timeMs);
+}
 function createLyricsUI() {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
@@ -1890,24 +1974,109 @@ function createLyricsUI() {
   body.className = "spotify-lyrics-body";
   root.appendChild(body);
   let currentTrackUri = null;
+  let syncedLines = [];
+  let playback = null;
+  let activeLineIndex = -1;
+  let tickTimer = null;
+  function stopTicking() {
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+  }
+  function startTicking() {
+    if (tickTimer || syncedLines.length === 0)
+      return;
+    tickTimer = setInterval(updateActiveLine, 200);
+  }
+  function getProgressMs() {
+    if (!playback)
+      return 0;
+    if (!playback.isPlaying)
+      return playback.progressMs;
+    return Math.min(playback.progressMs + Date.now() - playback.updatedAt, playback.durationMs || Infinity);
+  }
+  function updateLineClasses(nextActiveLineIndex) {
+    activeLineIndex = nextActiveLineIndex;
+    syncedLines.forEach((line, index) => {
+      const classes = ["spotify-lyrics-line"];
+      if (!line.text)
+        classes.push("spotify-lyrics-line-blank");
+      if (index === activeLineIndex)
+        classes.push("spotify-lyrics-line-active");
+      else if (index < activeLineIndex)
+        classes.push("spotify-lyrics-line-past");
+      else
+        classes.push("spotify-lyrics-line-future");
+      line.el.className = classes.join(" ");
+    });
+    const activeLine = syncedLines[activeLineIndex];
+    if (activeLine) {
+      activeLine.el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+  function updateActiveLine() {
+    if (syncedLines.length === 0)
+      return;
+    const progressMs = getProgressMs();
+    let nextActiveLineIndex = -1;
+    for (let i = 0;i < syncedLines.length; i++) {
+      if (syncedLines[i].timeMs > progressMs)
+        break;
+      nextActiveLineIndex = i;
+    }
+    if (nextActiveLineIndex !== activeLineIndex) {
+      updateLineClasses(nextActiveLineIndex);
+    }
+  }
   function clear() {
+    stopTicking();
     body.innerHTML = "";
     body.className = "spotify-lyrics-body";
     currentTrackUri = null;
+    syncedLines = [];
+    playback = null;
+    activeLineIndex = -1;
   }
   function setLoading(loading) {
     if (loading) {
+      stopTicking();
       body.innerHTML = "";
       body.className = "spotify-lyrics-body";
+      syncedLines = [];
+      activeLineIndex = -1;
       const el = document.createElement("div");
       el.className = "spotify-lyrics-status";
       el.textContent = "Loading lyrics…";
       body.appendChild(el);
     }
   }
-  function update(trackUri, lyrics, instrumental) {
+  function renderSyncedLyrics(lines) {
+    body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
+    syncedLines = lines.map((line) => {
+      const el = document.createElement("div");
+      el.className = `spotify-lyrics-line${line.text ? " spotify-lyrics-line-future" : " spotify-lyrics-line-blank spotify-lyrics-line-future"}`;
+      el.textContent = line.text || " ";
+      body.appendChild(el);
+      return { ...line, el };
+    });
+    updateActiveLine();
+    if (playback?.isPlaying)
+      startTicking();
+  }
+  function renderPlainLyrics(lyrics) {
+    body.className = "spotify-lyrics-body spotify-lyrics-has-content";
+    const pre = document.createElement("div");
+    pre.className = "spotify-lyrics-text";
+    pre.textContent = lyrics;
+    body.appendChild(pre);
+  }
+  function update(trackUri, plainLyrics, syncedLyrics, instrumental) {
+    stopTicking();
     currentTrackUri = trackUri;
     body.innerHTML = "";
+    syncedLines = [];
+    activeLineIndex = -1;
     if (instrumental) {
       body.className = "spotify-lyrics-body";
       const el = document.createElement("div");
@@ -1916,7 +2085,12 @@ function createLyricsUI() {
       body.appendChild(el);
       return;
     }
-    if (!lyrics) {
+    const parsedSyncedLyrics = parseSyncedLyrics(syncedLyrics);
+    if (parsedSyncedLyrics.length > 0) {
+      renderSyncedLyrics(parsedSyncedLyrics);
+      return;
+    }
+    if (!plainLyrics) {
       body.className = "spotify-lyrics-body";
       const el = document.createElement("div");
       el.className = "spotify-lyrics-status";
@@ -1924,18 +2098,35 @@ function createLyricsUI() {
       body.appendChild(el);
       return;
     }
-    body.className = "spotify-lyrics-body spotify-lyrics-has-content";
-    const pre = document.createElement("div");
-    pre.className = "spotify-lyrics-text";
-    pre.textContent = lyrics;
-    body.appendChild(pre);
+    renderPlainLyrics(plainLyrics);
+  }
+  function updatePlayback(state) {
+    if (!state || state.trackUri !== currentTrackUri) {
+      playback = null;
+      stopTicking();
+      return;
+    }
+    playback = {
+      trackUri: state.trackUri,
+      progressMs: state.progressMs,
+      durationMs: state.durationMs,
+      isPlaying: state.isPlaying,
+      updatedAt: Date.now()
+    };
+    updateActiveLine();
+    if (state.isPlaying)
+      startTicking();
+    else
+      stopTicking();
   }
   return {
     root,
     update,
+    updatePlayback,
     setLoading,
     clear,
     destroy() {
+      stopTicking();
       root.remove();
     }
   };
@@ -1993,11 +2184,8 @@ function setup(ctx) {
     savePositionTimer = setTimeout(saveWidgetPrefs, 500);
   }
   function getServerBaseUrl() {
-    const origin = window.location.origin;
-    if (new URL(origin).hostname === "localhost") {
-      return origin.replace("://localhost", "://127.0.0.1");
-    }
-    return origin;
+    const { port } = window.location;
+    return `http://127.0.0.1${port ? `:${port}` : ""}`;
   }
   function sendToBackend(msg) {
     ctx.sendToBackend(msg);
@@ -2391,6 +2579,7 @@ function setup(ctx) {
         nowPlayingUI.update(currentState, connected);
         controlsUI.update(currentState, connected);
         miniPlayer.update(currentState, connected);
+        lyricsUI.updatePlayback(currentState);
         updateWidget(currentState);
         scheduleTrackEndRefresh(currentState);
         const artUrl = currentState?.albumArtUrl ?? null;
@@ -2482,10 +2671,14 @@ function setup(ctx) {
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
         miniPlayer.update(null, false);
+        lyricsUI.clear();
         updateWidget(null);
         break;
       case "lyrics":
-        lyricsUI.update(msg.trackUri, msg.lyrics, msg.instrumental);
+        if (msg.trackUri && msg.trackUri !== lastLyricsTrackUri)
+          break;
+        lyricsUI.update(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
+        lyricsUI.updatePlayback(currentState);
         break;
       case "error":
         console.warn("[Spotify Controls]", msg.message);

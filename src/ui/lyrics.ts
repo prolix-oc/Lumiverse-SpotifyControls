@@ -1,9 +1,55 @@
+import type { PlaybackState } from "../types";
+
 export interface LyricsUI {
   root: HTMLElement;
-  update(trackUri: string | null, lyrics: string | null, instrumental: boolean): void;
+  update(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean): void;
+  updatePlayback(state: PlaybackState | null): void;
   setLoading(loading: boolean): void;
   clear(): void;
   destroy(): void;
+}
+
+interface SyncedLyricLine {
+  timeMs: number;
+  text: string;
+  el: HTMLDivElement;
+}
+
+interface LyricsPlayback {
+  trackUri: string;
+  progressMs: number;
+  durationMs: number;
+  isPlaying: boolean;
+  updatedAt: number;
+}
+
+function parseTimestamp(raw: string): number | null {
+  const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
+  if (!match) return null;
+
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  const fraction = match[3] ? Number(match[3].padEnd(3, "0")) : 0;
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) return null;
+
+  return minutes * 60_000 + seconds * 1000 + fraction;
+}
+
+function parseSyncedLyrics(value: string | null): Array<{ timeMs: number; text: string }> {
+  if (!value) return [];
+
+  const parsed: Array<{ timeMs: number; text: string }> = [];
+  for (const line of value.split(/\r?\n/)) {
+    const timestamps = [...line.matchAll(/\[([^\]]+)\]/g)]
+      .map((match) => parseTimestamp(match[1]))
+      .filter((timeMs): timeMs is number => timeMs !== null);
+    if (timestamps.length === 0) continue;
+
+    const text = line.replace(/(?:\[[^\]]+\])+/g, "").trim();
+    for (const timeMs of timestamps) parsed.push({ timeMs, text });
+  }
+
+  return parsed.sort((a, b) => a.timeMs - b.timeMs);
 }
 
 export function createLyricsUI(): LyricsUI {
@@ -20,17 +66,78 @@ export function createLyricsUI(): LyricsUI {
   root.appendChild(body);
 
   let currentTrackUri: string | null = null;
+  let syncedLines: SyncedLyricLine[] = [];
+  let playback: LyricsPlayback | null = null;
+  let activeLineIndex = -1;
+  let tickTimer: ReturnType<typeof setInterval> | null = null;
+
+  function stopTicking() {
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+  }
+
+  function startTicking() {
+    if (tickTimer || syncedLines.length === 0) return;
+    tickTimer = setInterval(updateActiveLine, 200);
+  }
+
+  function getProgressMs(): number {
+    if (!playback) return 0;
+    if (!playback.isPlaying) return playback.progressMs;
+    return Math.min(playback.progressMs + Date.now() - playback.updatedAt, playback.durationMs || Infinity);
+  }
+
+  function updateLineClasses(nextActiveLineIndex: number) {
+    activeLineIndex = nextActiveLineIndex;
+    syncedLines.forEach((line, index) => {
+      const classes = ["spotify-lyrics-line"];
+      if (!line.text) classes.push("spotify-lyrics-line-blank");
+      if (index === activeLineIndex) classes.push("spotify-lyrics-line-active");
+      else if (index < activeLineIndex) classes.push("spotify-lyrics-line-past");
+      else classes.push("spotify-lyrics-line-future");
+      line.el.className = classes.join(" ");
+    });
+
+    const activeLine = syncedLines[activeLineIndex];
+    if (activeLine) {
+      activeLine.el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  function updateActiveLine() {
+    if (syncedLines.length === 0) return;
+
+    const progressMs = getProgressMs();
+    let nextActiveLineIndex = -1;
+    for (let i = 0; i < syncedLines.length; i++) {
+      if (syncedLines[i].timeMs > progressMs) break;
+      nextActiveLineIndex = i;
+    }
+
+    if (nextActiveLineIndex !== activeLineIndex) {
+      updateLineClasses(nextActiveLineIndex);
+    }
+  }
 
   function clear() {
+    stopTicking();
     body.innerHTML = "";
     body.className = "spotify-lyrics-body";
     currentTrackUri = null;
+    syncedLines = [];
+    playback = null;
+    activeLineIndex = -1;
   }
 
   function setLoading(loading: boolean) {
     if (loading) {
+      stopTicking();
       body.innerHTML = "";
       body.className = "spotify-lyrics-body";
+      syncedLines = [];
+      activeLineIndex = -1;
       const el = document.createElement("div");
       el.className = "spotify-lyrics-status";
       el.textContent = "Loading lyrics…";
@@ -38,9 +145,33 @@ export function createLyricsUI(): LyricsUI {
     }
   }
 
-  function update(trackUri: string | null, lyrics: string | null, instrumental: boolean) {
+  function renderSyncedLyrics(lines: Array<{ timeMs: number; text: string }>) {
+    body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
+    syncedLines = lines.map((line) => {
+      const el = document.createElement("div");
+      el.className = `spotify-lyrics-line${line.text ? " spotify-lyrics-line-future" : " spotify-lyrics-line-blank spotify-lyrics-line-future"}`;
+      el.textContent = line.text || " ";
+      body.appendChild(el);
+      return { ...line, el };
+    });
+    updateActiveLine();
+    if (playback?.isPlaying) startTicking();
+  }
+
+  function renderPlainLyrics(lyrics: string) {
+    body.className = "spotify-lyrics-body spotify-lyrics-has-content";
+    const pre = document.createElement("div");
+    pre.className = "spotify-lyrics-text";
+    pre.textContent = lyrics;
+    body.appendChild(pre);
+  }
+
+  function update(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean) {
+    stopTicking();
     currentTrackUri = trackUri;
     body.innerHTML = "";
+    syncedLines = [];
+    activeLineIndex = -1;
 
     if (instrumental) {
       body.className = "spotify-lyrics-body";
@@ -51,7 +182,13 @@ export function createLyricsUI(): LyricsUI {
       return;
     }
 
-    if (!lyrics) {
+    const parsedSyncedLyrics = parseSyncedLyrics(syncedLyrics);
+    if (parsedSyncedLyrics.length > 0) {
+      renderSyncedLyrics(parsedSyncedLyrics);
+      return;
+    }
+
+    if (!plainLyrics) {
       body.className = "spotify-lyrics-body";
       const el = document.createElement("div");
       el.className = "spotify-lyrics-status";
@@ -60,19 +197,37 @@ export function createLyricsUI(): LyricsUI {
       return;
     }
 
-    body.className = "spotify-lyrics-body spotify-lyrics-has-content";
-    const pre = document.createElement("div");
-    pre.className = "spotify-lyrics-text";
-    pre.textContent = lyrics;
-    body.appendChild(pre);
+    renderPlainLyrics(plainLyrics);
+  }
+
+  function updatePlayback(state: PlaybackState | null) {
+    if (!state || state.trackUri !== currentTrackUri) {
+      playback = null;
+      stopTicking();
+      return;
+    }
+
+    playback = {
+      trackUri: state.trackUri,
+      progressMs: state.progressMs,
+      durationMs: state.durationMs,
+      isPlaying: state.isPlaying,
+      updatedAt: Date.now(),
+    };
+    updateActiveLine();
+
+    if (state.isPlaying) startTicking();
+    else stopTicking();
   }
 
   return {
     root,
     update,
+    updatePlayback,
     setLoading,
     clear,
     destroy() {
+      stopTicking();
       root.remove();
     },
   };

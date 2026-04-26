@@ -12,7 +12,8 @@ let pendingOAuth: {
   state: string;
   redirectUri: string;
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string;
+  codeVerifier: string;
   userId: string;
 } | null = null;
 
@@ -42,11 +43,35 @@ async function saveConfig(config: SpotifyConfig, userId: string): Promise<void> 
   await Promise.all([
     config.clientSecret
       ? spindle.enclave.put("client_secret", config.clientSecret, userId)
-      : Promise.resolve(),
+      : spindle.enclave.delete("client_secret", userId),
     config.lastfmApiKey
       ? spindle.enclave.put("lastfm_api_key", config.lastfmApiKey, userId)
       : Promise.resolve(),
   ]);
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function createCodeVerifier(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+async function createCodeChallenge(verifier: string): Promise<string> {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function getLoopbackRedirectUri(serverBaseUrl: string): string {
+  const url = new URL(serverBaseUrl);
+  url.hostname = "127.0.0.1";
+  return url.origin + spindle.oauth.getCallbackUrl();
 }
 
 const MIGRATION_FLAG = "enclave_migration_done.json";
@@ -276,7 +301,7 @@ function pushStateAfterCommand(userId: string, expectTrackChange = false) {
 
 // ─── OAuth callback handler ─────────────────────────────────────────────
 
-spindle.oauth.onCallback(async (params) => {
+async function completeOAuthCallback(params: Record<string, string>) {
   const { code, state, error } = params;
   const pendingUserId = pendingOAuth?.userId;
 
@@ -288,17 +313,21 @@ spindle.oauth.onCallback(async (params) => {
     return { html: errorPage(`Authorization denied: ${error}`) };
   }
 
+  if (!code) {
+    return { html: errorPage("OAuth callback did not include an authorization code.") };
+  }
+
   if (!pendingOAuth || state !== pendingOAuth.state) {
     return { html: errorPage("Invalid or expired OAuth state. Please try connecting again.") };
   }
 
-  const { redirectUri, clientId, clientSecret, userId: oauthUserId } = pendingOAuth;
+  const { redirectUri, clientId, clientSecret, codeVerifier, userId: oauthUserId } = pendingOAuth;
   pendingOAuth = null;
 
   try {
     spotify.setActiveUser(oauthUserId);
     activeUserId = oauthUserId;
-    const tokens = await spotify.exchangeCodeForTokens(code, redirectUri, clientId, clientSecret);
+    const tokens = await spotify.exchangeCodeForTokens(code, redirectUri, clientId, clientSecret, codeVerifier);
     await spotify.saveTokens(tokens);
     send({ type: "connected" }, oauthUserId);
     startPolling();
@@ -308,6 +337,21 @@ spindle.oauth.onCallback(async (params) => {
     send({ type: "error", message: `Authentication failed: ${err?.message}` }, oauthUserId);
     return { html: errorPage(err?.message || "Token exchange failed. Please try again.") };
   }
+}
+
+function parseCallbackUrl(value: string): Record<string, string> {
+  const trimmed = value.trim();
+  const query = trimmed.includes("?") ? trimmed.slice(trimmed.indexOf("?") + 1) : trimmed;
+  const params = new URLSearchParams(query);
+  const result: Record<string, string> = {};
+  for (const [key, paramValue] of params) {
+    result[key] = paramValue;
+  }
+  return result;
+}
+
+spindle.oauth.onCallback(async (params) => {
+  return completeOAuthCallback(params);
 });
 
 function successPage(): string {
@@ -372,14 +416,14 @@ spindle.onFrontendMessage(async (raw, userId) => {
       case "connect": {
         const { clientId, clientSecret, serverBaseUrl } = msg;
         const existing = await loadConfig(userId);
-        await saveConfig({ clientId, clientSecret, lastfmApiKey: existing.lastfmApiKey }, userId);
+        await saveConfig({ clientId, clientSecret: clientSecret || "", lastfmApiKey: existing.lastfmApiKey }, userId);
 
         const state = await spindle.oauth.createState();
-        // Spotify rejects "localhost" in redirect URIs — use IPv4 loopback 127.0.0.1
-        const baseUrl = serverBaseUrl.replace("://localhost", "://127.0.0.1");
-        const redirectUri = baseUrl + spindle.oauth.getCallbackUrl();
+        const codeVerifier = createCodeVerifier();
+        const codeChallenge = await createCodeChallenge(codeVerifier);
+        const redirectUri = getLoopbackRedirectUri(serverBaseUrl);
 
-        pendingOAuth = { state, redirectUri, clientId, clientSecret, userId };
+        pendingOAuth = { state, redirectUri, clientId, clientSecret: clientSecret || undefined, codeVerifier, userId };
 
         const scopes = "user-read-playback-state user-modify-playback-state user-read-currently-playing";
         const params = new URLSearchParams({
@@ -388,9 +432,19 @@ spindle.onFrontendMessage(async (raw, userId) => {
           scope: scopes,
           redirect_uri: redirectUri,
           state: state,
+          code_challenge_method: "S256",
+          code_challenge: codeChallenge,
         });
 
         send({ type: "auth_url", url: `https://accounts.spotify.com/authorize?${params.toString()}` }, userId);
+        break;
+      }
+
+      case "complete_auth_callback": {
+        const result = await completeOAuthCallback(parseCallbackUrl(msg.callbackUrl));
+        if (result?.html?.includes("Connection Failed")) {
+          send({ type: "error", message: "Could not complete Spotify authorization from that callback URL." }, userId);
+        }
         break;
       }
 
@@ -499,11 +553,13 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
 
       case "get_lyrics": {
+        const trackUri = lastState?.trackUri || "";
         const lyrics = await getLyricsForCurrentTrack();
         send({
           type: "lyrics",
-          trackUri: lastState?.trackUri || "",
-          lyrics: lyrics?.plainLyrics || null,
+          trackUri,
+          plainLyrics: lyrics?.plainLyrics || null,
+          syncedLyrics: lyrics?.syncedLyrics || null,
           instrumental: !!lyrics?.instrumental,
         }, userId);
         break;
