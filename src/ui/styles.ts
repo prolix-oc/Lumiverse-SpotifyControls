@@ -1,19 +1,20 @@
 export const PANEL_CSS = `
 .spotify-tab-root {
-  display: flex;
-  height: 100%;
+  position: relative;
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
   min-height: 0;
   overflow: hidden;
 }
 
 .spotify-panel {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 12px 12px 0;
-  flex: 1;
-  height: 100%;
-  max-height: 100%;
   min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
