@@ -925,7 +925,7 @@ var PANEL_CSS = `
   transform: scale(0.96);
   transform-origin: center center;
   cursor: pointer;
-  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease;
+  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease, font-size 160ms ease;
 }
 
 .spotify-lyrics-line:hover {
@@ -935,6 +935,8 @@ var PANEL_CSS = `
 .spotify-lyrics-line-active {
   color: var(--lumiverse-text);
   background: var(--lumiverse-fill-subtle);
+  font-size: 16px;
+  font-weight: 650;
   opacity: 1;
   transform: scale(1);
 }
@@ -1970,6 +1972,7 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
 }
 
 // src/ui/lyrics.ts
+var USER_SCROLL_SUPPRESS_MS = 2500;
 function parseTimestamp(raw) {
   const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
   if (!match)
@@ -2020,6 +2023,27 @@ function createLyricsUI(onSeek) {
   let playback = null;
   let activeLineIndex = -1;
   let tickTimer = null;
+  let autoScrollTimer = null;
+  let isAutoScrolling = false;
+  let lastUserScrollAt = 0;
+  function stopAutoScrollTracking() {
+    if (autoScrollTimer) {
+      clearTimeout(autoScrollTimer);
+      autoScrollTimer = null;
+    }
+    isAutoScrolling = false;
+  }
+  function noteUserScroll() {
+    stopAutoScrollTracking();
+    lastUserScrollAt = Date.now();
+  }
+  body.addEventListener("wheel", noteUserScroll, { passive: true });
+  body.addEventListener("touchmove", noteUserScroll, { passive: true });
+  body.addEventListener("pointerdown", noteUserScroll, { passive: true });
+  body.addEventListener("scroll", () => {
+    if (!isAutoScrolling)
+      lastUserScrollAt = Date.now();
+  }, { passive: true });
   function stopTicking() {
     if (tickTimer) {
       clearInterval(tickTimer);
@@ -2053,8 +2077,12 @@ function createLyricsUI(onSeek) {
       line.el.className = classes.join(" ");
     });
     const activeLine = syncedLines[activeLineIndex];
-    if (activeLine) {
+    if (activeLine && Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS) {
+      isAutoScrolling = true;
+      if (autoScrollTimer)
+        clearTimeout(autoScrollTimer);
       activeLine.el.scrollIntoView({ block: "center", behavior: "smooth" });
+      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
     }
   }
   function updateActiveLine() {
@@ -2073,6 +2101,7 @@ function createLyricsUI(onSeek) {
   }
   function clear() {
     stopTicking();
+    stopAutoScrollTracking();
     body.innerHTML = "";
     body.className = "spotify-lyrics-body";
     currentTrackUri = null;
@@ -2083,6 +2112,7 @@ function createLyricsUI(onSeek) {
   function setLoading(loading) {
     if (loading) {
       stopTicking();
+      stopAutoScrollTracking();
       body.innerHTML = "";
       body.className = "spotify-lyrics-body";
       syncedLines = [];
@@ -2116,6 +2146,7 @@ function createLyricsUI(onSeek) {
   }
   function update(trackUri, plainLyrics, syncedLyrics, instrumental) {
     stopTicking();
+    stopAutoScrollTracking();
     currentTrackUri = trackUri;
     body.innerHTML = "";
     syncedLines = [];
@@ -2170,6 +2201,7 @@ function createLyricsUI(onSeek) {
     clear,
     destroy() {
       stopTicking();
+      stopAutoScrollTracking();
       root.remove();
     }
   };

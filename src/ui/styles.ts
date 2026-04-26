@@ -924,7 +924,7 @@ export const PANEL_CSS = `
   transform: scale(0.96);
   transform-origin: center center;
   cursor: pointer;
-  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease;
+  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease, font-size 160ms ease;
 }
 
 .spotify-lyrics-line:hover {
@@ -934,6 +934,8 @@ export const PANEL_CSS = `
 .spotify-lyrics-line-active {
   color: var(--lumiverse-text);
   background: var(--lumiverse-fill-subtle);
+  font-size: 16px;
+  font-weight: 650;
   opacity: 1;
   transform: scale(1);
 }
