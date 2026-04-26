@@ -49,7 +49,17 @@ function parseSyncedLyrics(value: string | null): Array<{ timeMs: number; text: 
     for (const timeMs of timestamps) parsed.push({ timeMs, text });
   }
 
-  return parsed.sort((a, b) => a.timeMs - b.timeMs);
+  const grouped: Array<{ timeMs: number; text: string }> = [];
+  for (const line of parsed.sort((a, b) => a.timeMs - b.timeMs)) {
+    const previous = grouped[grouped.length - 1];
+    if (previous?.timeMs === line.timeMs) {
+      previous.text = [previous.text, line.text].filter(Boolean).join("\n");
+    } else {
+      grouped.push({ ...line });
+    }
+  }
+
+  return grouped;
 }
 
 export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI {

@@ -905,19 +905,24 @@ export const PANEL_CSS = `
 }
 
 .spotify-lyrics-synced {
-  gap: 4px;
+  gap: 10px;
   scroll-behavior: smooth;
 }
 
 .spotify-lyrics-line {
-  min-height: 1.8em;
-  padding: 2px 14px;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 14px;
   font-size: 15px;
-  line-height: 1.8;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--lumiverse-text-dim);
   text-align: center;
   border-radius: 12px;
   transform: scale(0.96);
+  transform-origin: center center;
   cursor: pointer;
   transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease;
 }
