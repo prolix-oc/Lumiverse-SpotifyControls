@@ -883,7 +883,7 @@ var PANEL_CSS = `
   position: relative;
   padding-top: 28px;
   padding-bottom: 112px;
-  padding-inline: 6px;
+  padding-inline: 2px;
   scroll-padding-top: 34%;
   scroll-padding-bottom: 112px;
   box-sizing: border-box;
