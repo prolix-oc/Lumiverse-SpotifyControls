@@ -2198,12 +2198,24 @@ function createCrossfadeArt(className) {
   let activeImg = imgA;
   let inactiveImg = imgB;
   let hasLoadedOnce = false;
+  function resetImage(img) {
+    img.onload = null;
+    img.onerror = null;
+    img.removeAttribute("src");
+  }
+  function hideArt() {
+    el.style.display = "none";
+    activeImg.style.opacity = "1";
+    inactiveImg.style.opacity = "0";
+  }
   function setUrl(url) {
     if (url === currentUrl)
       return;
     currentUrl = url;
     if (!url) {
-      el.style.display = "none";
+      resetImage(activeImg);
+      resetImage(inactiveImg);
+      hideArt();
       return;
     }
     if (!hasLoadedOnce) {
@@ -2213,6 +2225,8 @@ function createCrossfadeArt(className) {
       };
       activeImg.onerror = () => {
         currentUrl = null;
+        resetImage(activeImg);
+        hideArt();
       };
       activeImg.src = url;
       if (activeImg.complete && activeImg.naturalWidth > 0) {
@@ -2231,6 +2245,8 @@ function createCrossfadeArt(className) {
     };
     inactiveImg.onerror = () => {
       currentUrl = null;
+      resetImage(inactiveImg);
+      inactiveImg.style.opacity = "0";
     };
     inactiveImg.src = url;
     if (inactiveImg.complete && inactiveImg.naturalWidth > 0) {

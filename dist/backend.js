@@ -778,10 +778,6 @@ spindle.onFrontendMessage(async (raw, userId) => {
   try {
     switch (msg.type) {
       case "get_state": {
-        const session = getSession(userId);
-        if (session.lastState && isConnected(userId)) {
-          send({ type: "state", playbackState: session.lastState, connected: true }, userId);
-        }
         const playbackState = isConnected(userId) ? await getCurrentPlayback(userId) : null;
         await cacheState(userId, playbackState);
         send({

@@ -53,12 +53,26 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
   let inactiveImg = imgB;
   let hasLoadedOnce = false;
 
+  function resetImage(img: HTMLImageElement) {
+    img.onload = null;
+    img.onerror = null;
+    img.removeAttribute("src");
+  }
+
+  function hideArt() {
+    el.style.display = "none";
+    activeImg.style.opacity = "1";
+    inactiveImg.style.opacity = "0";
+  }
+
   function setUrl(url: string | null) {
     if (url === currentUrl) return;
     currentUrl = url;
 
     if (!url) {
-      el.style.display = "none";
+      resetImage(activeImg);
+      resetImage(inactiveImg);
+      hideArt();
       return;
     }
 
@@ -71,6 +85,8 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
       };
       activeImg.onerror = () => {
         currentUrl = null;
+        resetImage(activeImg);
+        hideArt();
       };
       activeImg.src = url;
       if (activeImg.complete && activeImg.naturalWidth > 0) {
@@ -92,6 +108,8 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
     };
     inactiveImg.onerror = () => {
       currentUrl = null;
+      resetImage(inactiveImg);
+      inactiveImg.style.opacity = "0";
     };
     inactiveImg.src = url;
 

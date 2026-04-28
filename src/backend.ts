@@ -499,12 +499,6 @@ spindle.onFrontendMessage(async (raw, userId) => {
   try {
     switch (msg.type) {
       case "get_state": {
-        const session = getSession(userId);
-        // Return cached state immediately so the UI populates instantly
-        if (session.lastState && spotify.isConnected(userId)) {
-          send({ type: "state", playbackState: session.lastState, connected: true }, userId);
-        }
-        // Then fetch fresh state
         const playbackState = spotify.isConnected(userId)
           ? await spotify.getCurrentPlayback(userId)
           : null;
