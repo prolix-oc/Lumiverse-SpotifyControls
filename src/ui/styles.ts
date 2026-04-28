@@ -882,7 +882,7 @@ export const PANEL_CSS = `
   position: relative;
   padding-top: 28px;
   padding-bottom: 112px;
-  padding-inline: 2px;
+  padding-inline: 6px;
   scroll-padding-top: 34%;
   scroll-padding-bottom: 112px;
   box-sizing: border-box;
@@ -923,7 +923,7 @@ export const PANEL_CSS = `
   display: block;
   width: 100%;
   box-sizing: border-box;
-  padding: 6px 12px;
+  padding: 6px 8px;
   color: var(--lumiverse-text-dim);
   text-align: center;
   opacity: var(--spotify-lyrics-line-opacity);
