@@ -27,6 +27,8 @@ interface LyricsPlayback {
 const USER_SCROLL_SUPPRESS_MS = 2500;
 const LOADING_STATUS_DELAY_MS = 180;
 const EMPTY_SYNCED_LINE_SYMBOL = "♪";
+const SEEK_SYNC_TOLERANCE_MS = 1400;
+const SEEK_STATE_GRACE_MS = 1800;
 
 interface UpdateLineClassesOptions {
   forceCenter?: boolean;
@@ -114,6 +116,8 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   let loadingTimer: ReturnType<typeof setTimeout> | null = null;
   let isAutoScrolling = false;
   let lastUserScrollAt = 0;
+  let pendingSeekPositionMs: number | null = null;
+  let pendingSeekUntil = 0;
 
   function stopLoadingState() {
     if (loadingTimer) {
@@ -212,6 +216,8 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     syncedLines = [];
     playback = null;
     activeLineIndex = -1;
+    pendingSeekPositionMs = null;
+    pendingSeekUntil = 0;
   }
 
   function setLoading(loading: boolean) {
@@ -246,9 +252,12 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
       el.classList.add("spotify-lyrics-line-enter");
       el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(index * 28, 280)}ms`);
       textEl.className = "spotify-lyrics-line-text";
+      if (!line.text) textEl.classList.add("spotify-lyrics-line-symbol");
       textEl.textContent = getLineDisplayText(line.text);
       el.appendChild(textEl);
       el.addEventListener("click", () => {
+        pendingSeekPositionMs = line.timeMs;
+        pendingSeekUntil = Date.now() + SEEK_STATE_GRACE_MS;
         if (playback && playback.trackUri === currentTrackUri) {
           playback = {
             ...playback,
@@ -314,8 +323,23 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function updatePlayback(state: PlaybackState | null) {
     if (!state || state.trackUri !== currentTrackUri) {
       playback = null;
+      pendingSeekPositionMs = null;
+      pendingSeekUntil = 0;
       stopTicking();
       return;
+    }
+
+    if (pendingSeekPositionMs !== null) {
+      const isNearPendingSeek = Math.abs(state.progressMs - pendingSeekPositionMs) <= SEEK_SYNC_TOLERANCE_MS;
+      if (isNearPendingSeek) {
+        pendingSeekPositionMs = null;
+        pendingSeekUntil = 0;
+      } else if (Date.now() < pendingSeekUntil) {
+        return;
+      } else {
+        pendingSeekPositionMs = null;
+        pendingSeekUntil = 0;
+      }
     }
 
     playback = {

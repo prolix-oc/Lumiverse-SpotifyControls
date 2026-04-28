@@ -1025,6 +1025,14 @@ export const PANEL_CSS = `
   letter-spacing: 0.08em;
 }
 
+.spotify-lyrics-line-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  min-height: 1em;
+}
+
 .spotify-lyrics-text-enter {
   animation: spotify-lyrics-text-in 340ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
 }
