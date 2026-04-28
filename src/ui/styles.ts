@@ -948,6 +948,11 @@ export const PANEL_CSS = `
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), text-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1), filter 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.spotify-lyrics-line-text-long {
+  max-width: calc(100% - 32px);
+  margin-inline: auto;
+}
+
 .spotify-lyrics-line-enter {
   animation: spotify-lyrics-line-in 420ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
   animation-delay: var(--spotify-lyrics-enter-delay, 0ms);

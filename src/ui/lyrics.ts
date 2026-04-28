@@ -94,6 +94,10 @@ function getLineDisplayText(text: string): string {
   return text || EMPTY_SYNCED_LINE_SYMBOL;
 }
 
+function shouldReserveScaleGutter(text: string): boolean {
+  return !text.includes("\n") && text.length >= 36;
+}
+
 export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
@@ -253,6 +257,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
       el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(index * 28, 280)}ms`);
       textEl.className = "spotify-lyrics-line-text";
       if (!line.text) textEl.classList.add("spotify-lyrics-line-symbol");
+      if (shouldReserveScaleGutter(line.text)) textEl.classList.add("spotify-lyrics-line-text-long");
       textEl.textContent = getLineDisplayText(line.text);
       el.appendChild(textEl);
       el.addEventListener("click", () => {
