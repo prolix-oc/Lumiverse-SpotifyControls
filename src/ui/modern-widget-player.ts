@@ -28,8 +28,7 @@ function getCompactPlainLyricLines(lyrics: string | null): string[] {
   return lyrics
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 5);
+    .filter(Boolean);
 }
 
 function stopEventPropagation(el: HTMLElement) {
@@ -265,7 +264,7 @@ export function createModernWidgetPlayerUI(
   let lastIsPlaying = false;
   let animFrameId: number | null = null;
   let lyricsTrackUri: string | null = null;
-  const syncedLyricsModel = createSyncedLyricsModel(5);
+  const syncedLyricsModel = createSyncedLyricsModel();
   let plainLyricLines: string[] = [];
   let lyricsInstrumental = false;
   let lyricsLoading = false;

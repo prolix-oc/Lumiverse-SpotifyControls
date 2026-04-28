@@ -503,22 +503,31 @@ var PANEL_CSS = `
 /* Modern expanding widget player */
 .spotify-modern-widget-player {
   --spotify-modern-widget-collapsed-size: 48px;
-  --spotify-modern-expanded-surface: var(--lumiverse-fill);
-  --spotify-modern-expanded-surface-alt: var(--lumiverse-fill-subtle);
+  --spotify-modern-expanded-surface: var(--lcs-glass-bg, var(--lumiverse-bg-elevated));
+  --spotify-modern-expanded-surface-alt: var(--lcs-glass-bg-hover, var(--lumiverse-bg));
   width: 100%;
   height: 100%;
   position: relative;
   overflow: hidden;
   border-radius: inherit;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 100%),
-    linear-gradient(180deg, rgba(19, 19, 22, 0.96) 0%, rgba(10, 10, 13, 0.98) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  -webkit-backdrop-filter: var(--lcs-glass-blur, blur(24px));
-  backdrop-filter: var(--lcs-glass-blur, blur(24px));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.022) 0%, rgba(255, 255, 255, 0.008) 42%, rgba(255, 255, 255, 0.014) 100%),
+    linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
+  border: 1px solid var(--lcs-glass-border, var(--lumiverse-border));
+  box-shadow:
+    0 14px 34px var(--lumiverse-fill-heavy),
+    var(--lumiverse-highlight-inset),
+    inset 0 -1px 0 var(--lcs-glass-border, var(--lumiverse-border));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   color: #fff;
   transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, background 320ms ease;
+}
+
+[data-glass] .spotify-modern-widget-player {
+  -webkit-backdrop-filter: blur(var(--lcs-glass-blur, 8px));
+  backdrop-filter: blur(var(--lcs-glass-blur, 8px));
+  will-change: backdrop-filter;
 }
 
 .spotify-modern-widget-player[data-expanded="false"] {
@@ -528,8 +537,10 @@ var PANEL_CSS = `
 
 .spotify-modern-widget-player[data-expanded="true"] {
   min-height: 420px;
-  background: linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
-  border-color: var(--lumiverse-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024) 0%, rgba(255, 255, 255, 0.01) 100%),
+    linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
+  border-color: var(--lcs-glass-border, var(--lumiverse-border));
   box-shadow: var(--lumiverse-shadow-xl);
 }
 
@@ -622,7 +633,9 @@ var PANEL_CSS = `
   padding: 14px 14px 12px;
   box-sizing: border-box;
   min-height: 100%;
-  background: linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.014) 0%, rgba(255, 255, 255, 0.005) 100%),
+    linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
 }
 
 .spotify-modern-widget-header,
@@ -835,8 +848,10 @@ var PANEL_CSS = `
   min-height: 0;
   padding: 14px 14px 12px;
   border-radius: 22px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0.012) 100%),
+    var(--spotify-modern-expanded-surface);
+  border: 1px solid var(--lcs-glass-border, var(--lumiverse-border));
   overflow: hidden;
 }
 
@@ -3209,7 +3224,7 @@ function formatTime3(ms) {
 function getCompactPlainLyricLines2(lyrics) {
   if (!lyrics)
     return [];
-  return lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 5);
+  return lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 function stopEventPropagation(el) {
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -3394,7 +3409,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   let lastIsPlaying = false;
   let animFrameId = null;
   let lyricsTrackUri = null;
-  const syncedLyricsModel = createSyncedLyricsModel(5);
+  const syncedLyricsModel = createSyncedLyricsModel();
   let plainLyricLines = [];
   let lyricsInstrumental = false;
   let lyricsLoading = false;
