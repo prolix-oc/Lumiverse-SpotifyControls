@@ -584,7 +584,7 @@ export function setup(ctx: SpindleFrontendContext) {
     );
 
     openContextMenuCount += 1;
-    miniPlayer.setLyricsUpdateSuspended(true);
+    miniPlayer.setUiSuspended(true);
 
     let selectedKey: string | undefined;
     try {
@@ -595,7 +595,7 @@ export function setup(ctx: SpindleFrontendContext) {
     } finally {
       openContextMenuCount = Math.max(0, openContextMenuCount - 1);
       if (openContextMenuCount === 0) {
-        miniPlayer.setLyricsUpdateSuspended(false);
+        miniPlayer.setUiSuspended(false);
       }
     }
 

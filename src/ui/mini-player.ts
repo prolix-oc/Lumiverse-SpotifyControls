@@ -25,6 +25,7 @@ export interface MiniPlayerUI {
   updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean): void;
   setLyricsLoading(loading: boolean): void;
   setLyricsUpdateSuspended(suspended: boolean): void;
+  setUiSuspended(suspended: boolean): void;
   setStyle(style: MiniPlayerStyle): void;
   setDevices(devices: DeviceInfo[]): void;
   setVolume(percent: number): void;
@@ -244,6 +245,10 @@ export function createMiniPlayerUI(
   let activeLyricLineIndex = -1;
   let lyricsUpdateSuspended = false;
   let pendingLyricsRefresh = false;
+  let uiSuspended = false;
+  let pendingPlaybackRefresh: { state: PlaybackState | null; connected: boolean } | null = null;
+  let pendingDevices: DeviceInfo[] | null = null;
+  let pendingVolume: number | null = null;
 
   function setLyricsStatus(message: string, loading = false) {
     lyricsStatus.className = loading
@@ -269,6 +274,29 @@ export function createMiniPlayerUI(
     if (!pendingLyricsRefresh || lyricsUpdateSuspended) return;
     pendingLyricsRefresh = false;
     updateActiveLyricLine(true);
+  }
+
+  function flushPendingUiRefresh() {
+    if (uiSuspended) return;
+
+    const nextPlaybackRefresh = pendingPlaybackRefresh;
+    const nextDevices = pendingDevices;
+    const nextVolume = pendingVolume;
+
+    pendingPlaybackRefresh = null;
+    pendingDevices = null;
+    pendingVolume = null;
+
+    if (nextPlaybackRefresh) {
+      update(nextPlaybackRefresh.state, nextPlaybackRefresh.connected);
+    }
+    if (nextDevices) {
+      setDevices(nextDevices);
+    }
+    if (nextVolume !== null) {
+      setVolume(nextVolume);
+    }
+    flushPendingLyricsRefresh();
   }
 
   function getInterpolatedProgressMs(): number {
@@ -379,7 +407,7 @@ export function createMiniPlayerUI(
   }
 
   function tickProgress() {
-    if (!visible || !lastIsPlaying || !currentDuration) {
+    if (uiSuspended || !visible || !lastIsPlaying || !currentDuration) {
       animFrameId = null;
       return;
     }
@@ -600,6 +628,11 @@ export function createMiniPlayerUI(
     currentState = state;
     currentConnected = connected;
 
+    if (uiSuspended) {
+      pendingPlaybackRefresh = { state, connected };
+      return;
+    }
+
     if (!connected || !state) {
       header.style.display = "none";
       progressRow.style.display = "none";
@@ -693,6 +726,11 @@ export function createMiniPlayerUI(
   }
 
   function setDevices(devices: DeviceInfo[]) {
+    if (uiSuspended) {
+      pendingDevices = devices;
+      return;
+    }
+
     deviceList.innerHTML = "";
     if (devices.length === 0) {
       deviceList.innerHTML = '<div class="spotify-mini-device-loading">No devices found</div>';
@@ -723,9 +761,23 @@ export function createMiniPlayerUI(
       lyricsUpdateSuspended = suspended;
       if (!suspended) flushPendingLyricsRefresh();
     },
+    setUiSuspended(suspended: boolean) {
+      uiSuspended = suspended;
+      lyricsUpdateSuspended = suspended;
+      if (suspended) {
+        stopTicking();
+        return;
+      }
+      flushPendingUiRefresh();
+      if (visible && lastIsPlaying) startTicking();
+    },
     setStyle,
     setDevices,
     setVolume(percent: number) {
+      if (uiSuspended) {
+        pendingVolume = percent;
+        return;
+      }
       volumeSlider.value = String(percent);
     },
     onVolumeChange(handler: (percent: number) => void) {

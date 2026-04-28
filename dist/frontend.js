@@ -2893,6 +2893,10 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
   let activeLyricLineIndex = -1;
   let lyricsUpdateSuspended = false;
   let pendingLyricsRefresh = false;
+  let uiSuspended = false;
+  let pendingPlaybackRefresh = null;
+  let pendingDevices = null;
+  let pendingVolume = null;
   function setLyricsStatus(message, loading = false) {
     lyricsStatus.className = loading ? "spotify-mini-lyrics-status spotify-mini-lyrics-status-loading" : "spotify-mini-lyrics-status";
     lyricsStatus.textContent = message;
@@ -2914,6 +2918,26 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       return;
     pendingLyricsRefresh = false;
     updateActiveLyricLine(true);
+  }
+  function flushPendingUiRefresh() {
+    if (uiSuspended)
+      return;
+    const nextPlaybackRefresh = pendingPlaybackRefresh;
+    const nextDevices = pendingDevices;
+    const nextVolume = pendingVolume;
+    pendingPlaybackRefresh = null;
+    pendingDevices = null;
+    pendingVolume = null;
+    if (nextPlaybackRefresh) {
+      update(nextPlaybackRefresh.state, nextPlaybackRefresh.connected);
+    }
+    if (nextDevices) {
+      setDevices(nextDevices);
+    }
+    if (nextVolume !== null) {
+      setVolume(nextVolume);
+    }
+    flushPendingLyricsRefresh();
   }
   function getInterpolatedProgressMs() {
     if (!lastIsPlaying)
@@ -3017,7 +3041,7 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       applyPosition();
   }
   function tickProgress() {
-    if (!visible || !lastIsPlaying || !currentDuration) {
+    if (uiSuspended || !visible || !lastIsPlaying || !currentDuration) {
       animFrameId = null;
       return;
     }
@@ -3190,6 +3214,10 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
   function update(state, connected) {
     currentState = state;
     currentConnected = connected;
+    if (uiSuspended) {
+      pendingPlaybackRefresh = { state, connected };
+      return;
+    }
     if (!connected || !state) {
       header.style.display = "none";
       progressRow.style.display = "none";
@@ -3269,6 +3297,10 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       applyPosition();
   }
   function setDevices(devices) {
+    if (uiSuspended) {
+      pendingDevices = devices;
+      return;
+    }
     deviceList.innerHTML = "";
     if (devices.length === 0) {
       deviceList.innerHTML = '<div class="spotify-mini-device-loading">No devices found</div>';
@@ -3299,9 +3331,24 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       if (!suspended)
         flushPendingLyricsRefresh();
     },
+    setUiSuspended(suspended) {
+      uiSuspended = suspended;
+      lyricsUpdateSuspended = suspended;
+      if (suspended) {
+        stopTicking();
+        return;
+      }
+      flushPendingUiRefresh();
+      if (visible && lastIsPlaying)
+        startTicking();
+    },
     setStyle,
     setDevices,
     setVolume(percent) {
+      if (uiSuspended) {
+        pendingVolume = percent;
+        return;
+      }
       volumeSlider.value = String(percent);
     },
     onVolumeChange(handler) {
@@ -4681,7 +4728,7 @@ function setup(ctx) {
     }
     items.push({ key: currentMiniPlayerStyle === "modern" ? "div" : "div2", label: "", type: "divider" }, { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" }, { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" });
     openContextMenuCount += 1;
-    miniPlayer.setLyricsUpdateSuspended(true);
+    miniPlayer.setUiSuspended(true);
     let selectedKey;
     try {
       ({ selectedKey } = await ctx.ui.showContextMenu({
@@ -4691,7 +4738,7 @@ function setup(ctx) {
     } finally {
       openContextMenuCount = Math.max(0, openContextMenuCount - 1);
       if (openContextMenuCount === 0) {
-        miniPlayer.setLyricsUpdateSuspended(false);
+        miniPlayer.setUiSuspended(false);
       }
     }
     if (!selectedKey)
