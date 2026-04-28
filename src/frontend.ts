@@ -6,6 +6,7 @@ import { createNowPlayingUI } from "./ui/now-playing";
 import { createControlsUI } from "./ui/controls";
 import { createSearchUI } from "./ui/search";
 import { createMiniPlayerUI } from "./ui/mini-player";
+import { createModernWidgetPlayerUI } from "./ui/modern-widget-player";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./ui/crossfade-art";
 import { createLyricsUI } from "./ui/lyrics";
 
@@ -312,6 +313,9 @@ export function setup(ctx: SpindleFrontendContext) {
   const widgetContent = document.createElement("div");
   widgetContent.className = "spotify-float-widget";
 
+  const legacyWidgetVisual = document.createElement("div");
+  legacyWidgetVisual.className = "spotify-float-widget-legacy";
+
   const widgetIcon = document.createElement("div");
   widgetIcon.className = "spotify-float-widget-icon";
   widgetIcon.innerHTML = MUSIC_NOTE_SVG;
@@ -319,16 +323,58 @@ export function setup(ctx: SpindleFrontendContext) {
   const widgetArt = createCrossfadeArt("spotify-float-widget-art");
   widgetArt.el.style.display = "none";
 
-  widgetContent.appendChild(widgetIcon);
-  widgetContent.appendChild(widgetArt.el);
+  legacyWidgetVisual.appendChild(widgetIcon);
+  legacyWidgetVisual.appendChild(widgetArt.el);
+  widgetContent.appendChild(legacyWidgetVisual);
+
+  let modernWidgetExpanded = false;
+  const modernWidget = createModernWidgetPlayerUI(
+    sendToBackend,
+    () => tab.activate(),
+    () => setModernWidgetExpanded(false)
+  );
+  widgetContent.appendChild(modernWidget.root);
   widget.root.appendChild(widgetContent);
 
+  function getModernExpandedSize() {
+    return {
+      width: Math.max(300, Math.min(348, window.innerWidth - 24)),
+      height: Math.max(380, Math.min(456, window.innerHeight - 24)),
+    };
+  }
+
+  function setModernWidgetExpanded(expanded: boolean) {
+    modernWidgetExpanded = expanded && currentMiniPlayerStyle === "modern";
+    modernWidget.setExpanded(modernWidgetExpanded);
+    miniPlayer.hide();
+    applyWidgetStyle();
+    requestAnimationFrame(clampWidgetPosition);
+  }
+
   function applyWidgetStyle() {
+    widget.root.style.touchAction = "none";
+    modernWidget.setCollapsedSize(currentWidgetSize);
+
+    if (currentMiniPlayerStyle === "modern") {
+      const size = modernWidgetExpanded ? getModernExpandedSize() : { width: currentWidgetSize, height: currentWidgetSize };
+      widgetContent.classList.add("spotify-float-widget-modern-mode");
+      legacyWidgetVisual.style.display = "none";
+      modernWidget.root.style.display = "block";
+      widget.root.style.width = `${size.width}px`;
+      widget.root.style.height = `${size.height}px`;
+      widgetContent.style.width = `${size.width}px`;
+      widgetContent.style.height = `${size.height}px`;
+      widgetContent.style.borderRadius = modernWidgetExpanded ? "30px" : `${Math.max(18, Math.round(currentWidgetSize * 0.28))}px`;
+      return;
+    }
+
+    widgetContent.classList.remove("spotify-float-widget-modern-mode");
+    legacyWidgetVisual.style.display = "flex";
+    modernWidget.root.style.display = "none";
+
     const radius = currentArtShape === "circle" ? "50%" : "22%";
-    // Ensure both the framework container and inner content match the target size
     widget.root.style.width = `${currentWidgetSize}px`;
     widget.root.style.height = `${currentWidgetSize}px`;
-    widget.root.style.touchAction = "none";
     widgetContent.style.width = `${currentWidgetSize}px`;
     widgetContent.style.height = `${currentWidgetSize}px`;
     widgetContent.style.borderRadius = radius;
@@ -348,8 +394,9 @@ export function setup(ctx: SpindleFrontendContext) {
   function clampWidgetPosition() {
     const pos = widget.getPosition();
     const pad = 12;
-    const maxX = window.innerWidth - currentWidgetSize - pad;
-    const maxY = window.innerHeight - currentWidgetSize - pad;
+    const rect = widget.root.getBoundingClientRect();
+    const maxX = window.innerWidth - rect.width - pad;
+    const maxY = window.innerHeight - rect.height - pad;
     const clampedX = Math.max(pad, Math.min(pos.x, maxX));
     const clampedY = Math.max(pad, Math.min(pos.y, maxY));
     if (clampedX !== pos.x || clampedY !== pos.y) {
@@ -368,8 +415,9 @@ export function setup(ctx: SpindleFrontendContext) {
       return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
     }
   );
-  miniPlayer.setStyle(currentMiniPlayerStyle);
+  miniPlayer.setStyle("default");
   cleanups.push(() => miniPlayer.destroy());
+  cleanups.push(() => modernWidget.destroy());
 
   // Sync volume between drawer controls and mini player
   controlsUI.onVolumeChange((pct) => miniPlayer.setVolume(pct));
@@ -425,6 +473,10 @@ export function setup(ctx: SpindleFrontendContext) {
       return;
     }
     e.stopPropagation();
+    if (currentMiniPlayerStyle === "modern") {
+      if (!modernWidgetExpanded) setModernWidgetExpanded(true);
+      return;
+    }
     miniPlayer.toggle();
   });
 
@@ -460,8 +512,14 @@ export function setup(ctx: SpindleFrontendContext) {
       applyWidgetStyle();
     } else if (selectedKey === "mini-default" || selectedKey === "mini-modern") {
       currentMiniPlayerStyle = selectedKey === "mini-modern" ? "modern" : "default";
-      miniPlayer.setStyle(currentMiniPlayerStyle);
+      if (currentMiniPlayerStyle !== "modern") {
+        modernWidgetExpanded = false;
+        modernWidget.setExpanded(false);
+      }
+      miniPlayer.hide();
       saveWidgetPrefs();
+      applyWidgetStyle();
+      clampWidgetPosition();
     }
   }
 
@@ -491,20 +549,33 @@ export function setup(ctx: SpindleFrontendContext) {
   });
 
   widgetContent.addEventListener("touchend", (e) => {
-    // Always prevent default to block synthetic click/mouse events from
-    // reaching elements underneath the floating widget on mobile.
-    e.preventDefault();
     if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
     if (longPressFired) { longPressFired = false; return; }
+
+    if (currentMiniPlayerStyle === "modern" && modernWidgetExpanded) {
+      didDrag = false;
+      return;
+    }
+
+    // Prevent synthetic click/mouse events from reaching elements underneath
+    // the floating widget when we handle the tap ourselves.
+    e.preventDefault();
+
     // Since we block the browser's click generation, handle taps here
     if (!didDrag) {
-      miniPlayer.toggle();
+      if (currentMiniPlayerStyle === "modern") {
+        if (!modernWidgetExpanded) setModernWidgetExpanded(true);
+      } else {
+        miniPlayer.toggle();
+      }
     }
     didDrag = false;
   });
 
   function recreateWidget(newSize: number) {
     miniPlayer.hide();
+    modernWidgetExpanded = false;
+    modernWidget.setExpanded(false);
     const pos = widget.getPosition();
     widget.destroy();
 
@@ -542,6 +613,8 @@ export function setup(ctx: SpindleFrontendContext) {
       widgetArt.el.style.display = "none";
       widgetArt.setUrl(null);
     }
+
+    modernWidget.update(state, connected);
   }
 
   // ─── Tag Interceptor ─────────────────────────────────────────────────
@@ -619,12 +692,12 @@ export function setup(ctx: SpindleFrontendContext) {
         if (trackUri && trackUri !== lastLyricsTrackUri) {
           lastLyricsTrackUri = trackUri;
           lyricsUI.setLoading(true);
-          miniPlayer.setLyricsLoading(true);
+          modernWidget.setLyricsLoading(true);
           sendToBackend({ type: "get_lyrics" });
         } else if (!trackUri && lastLyricsTrackUri) {
           lastLyricsTrackUri = null;
           lyricsUI.clear();
-          miniPlayer.updateLyrics(null, null, null, false);
+          modernWidget.updateLyrics(null, null, null, false);
         }
         break;
       }
@@ -650,7 +723,10 @@ export function setup(ctx: SpindleFrontendContext) {
         currentArtShape = p.shape;
         currentSizeMode = p.sizeMode;
         currentMiniPlayerStyle = p.miniPlayerStyle;
-        miniPlayer.setStyle(currentMiniPlayerStyle);
+        if (currentMiniPlayerStyle !== "modern") {
+          modernWidgetExpanded = false;
+          modernWidget.setExpanded(false);
+        }
         if (anyChanged) {
           localStorage.setItem(PREFS_KEY, JSON.stringify(p));
         }
@@ -703,7 +779,10 @@ export function setup(ctx: SpindleFrontendContext) {
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
         miniPlayer.update(null, false);
-        miniPlayer.updateLyrics(null, null, null, false);
+        modernWidget.update(null, false);
+        modernWidget.updateLyrics(null, null, null, false);
+        modernWidgetExpanded = false;
+        modernWidget.setExpanded(false);
         lyricsUI.clear();
         updateWidget(null);
         break;
@@ -712,7 +791,7 @@ export function setup(ctx: SpindleFrontendContext) {
         if (msg.trackUri && msg.trackUri !== lastLyricsTrackUri) break;
         lyricsUI.update(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         lyricsUI.updatePlayback(currentState);
-        miniPlayer.updateLyrics(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
+        modernWidget.updateLyrics(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         break;
 
       case "error":
@@ -741,6 +820,9 @@ export function setup(ctx: SpindleFrontendContext) {
       nowPlayingUI.update(null, false);
       controlsUI.update(null, false);
       miniPlayer.update(null, false);
+      modernWidget.update(null, false);
+      modernWidgetExpanded = false;
+      modernWidget.setExpanded(false);
       updateWidget(null);
     }
   });
