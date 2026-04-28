@@ -2891,6 +2891,8 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
   let lyricsInstrumental = false;
   let lyricsLoading = false;
   let activeLyricLineIndex = -1;
+  let lyricsUpdateSuspended = false;
+  let pendingLyricsRefresh = false;
   function setLyricsStatus(message, loading = false) {
     lyricsStatus.className = loading ? "spotify-mini-lyrics-status spotify-mini-lyrics-status-loading" : "spotify-mini-lyrics-status";
     lyricsStatus.textContent = message;
@@ -2906,6 +2908,12 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     for (const el of lyricLineEls) {
       el.style.display = "";
     }
+  }
+  function flushPendingLyricsRefresh() {
+    if (!pendingLyricsRefresh || lyricsUpdateSuspended)
+      return;
+    pendingLyricsRefresh = false;
+    updateActiveLyricLine(true);
   }
   function getInterpolatedProgressMs() {
     if (!lastIsPlaying)
@@ -2974,6 +2982,10 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     setLyricsStatus("No lyrics available");
   }
   function updateActiveLyricLine(force = false) {
+    if (lyricsUpdateSuspended) {
+      pendingLyricsRefresh = true;
+      return;
+    }
     if (currentStyle !== "modern" || syncedLyrics.length === 0 || !currentState || currentState.trackUri !== lyricsTrackUri) {
       if (force && currentStyle === "modern")
         renderLyricsWindow();
@@ -2996,6 +3008,10 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     lyricsSection.style.display = shouldShowLyrics ? "" : "none";
     if (!shouldShowLyrics)
       return;
+    if (lyricsUpdateSuspended) {
+      pendingLyricsRefresh = true;
+      return;
+    }
     updateActiveLyricLine(true);
     if (reposition && visible)
       applyPosition();
@@ -3278,6 +3294,11 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     update,
     updateLyrics,
     setLyricsLoading,
+    setLyricsUpdateSuspended(suspended) {
+      lyricsUpdateSuspended = suspended;
+      if (!suspended)
+        flushPendingLyricsRefresh();
+    },
     setStyle,
     setDevices,
     setVolume(percent) {
@@ -4647,6 +4668,7 @@ function setup(ctx) {
     }
     miniPlayer.toggle();
   });
+  let openContextMenuCount = 0;
   async function showContextMenu(x, y) {
     const items = [
       { key: "small", label: "Small", active: currentSizeMode === "small" },
@@ -4658,10 +4680,20 @@ function setup(ctx) {
       items.push({ key: "div", label: "", type: "divider" }, { key: "circle", label: "Circle", active: currentArtShape === "circle" }, { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" });
     }
     items.push({ key: currentMiniPlayerStyle === "modern" ? "div" : "div2", label: "", type: "divider" }, { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" }, { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" });
-    const { selectedKey } = await ctx.ui.showContextMenu({
-      position: { x, y },
-      items
-    });
+    openContextMenuCount += 1;
+    miniPlayer.setLyricsUpdateSuspended(true);
+    let selectedKey;
+    try {
+      ({ selectedKey } = await ctx.ui.showContextMenu({
+        position: { x, y },
+        items
+      }));
+    } finally {
+      openContextMenuCount = Math.max(0, openContextMenuCount - 1);
+      if (openContextMenuCount === 0) {
+        miniPlayer.setLyricsUpdateSuspended(false);
+      }
+    }
     if (!selectedKey)
       return;
     if (selectedKey === "small" || selectedKey === "medium" || selectedKey === "large") {

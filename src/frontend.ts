@@ -559,6 +559,8 @@ export function setup(ctx: SpindleFrontendContext) {
 
   // ─── Context Menu (via Spindle API — themed, works on mobile via long-press) ─
 
+  let openContextMenuCount = 0;
+
   async function showContextMenu(x: number, y: number) {
     const items: Array<{ key: string; label: string; active?: boolean; type?: "divider" }> = [
       { key: "small", label: "Small", active: currentSizeMode === "small" },
@@ -581,10 +583,21 @@ export function setup(ctx: SpindleFrontendContext) {
       { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" }
     );
 
-    const { selectedKey } = await ctx.ui.showContextMenu({
-      position: { x, y },
-      items,
-    });
+    openContextMenuCount += 1;
+    miniPlayer.setLyricsUpdateSuspended(true);
+
+    let selectedKey: string | undefined;
+    try {
+      ({ selectedKey } = await ctx.ui.showContextMenu({
+        position: { x, y },
+        items,
+      }));
+    } finally {
+      openContextMenuCount = Math.max(0, openContextMenuCount - 1);
+      if (openContextMenuCount === 0) {
+        miniPlayer.setLyricsUpdateSuspended(false);
+      }
+    }
 
     if (!selectedKey) return;
 

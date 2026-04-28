@@ -24,6 +24,7 @@ export interface MiniPlayerUI {
   update(state: PlaybackState | null, connected: boolean): void;
   updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean): void;
   setLyricsLoading(loading: boolean): void;
+  setLyricsUpdateSuspended(suspended: boolean): void;
   setStyle(style: MiniPlayerStyle): void;
   setDevices(devices: DeviceInfo[]): void;
   setVolume(percent: number): void;
@@ -241,6 +242,8 @@ export function createMiniPlayerUI(
   let lyricsInstrumental = false;
   let lyricsLoading = false;
   let activeLyricLineIndex = -1;
+  let lyricsUpdateSuspended = false;
+  let pendingLyricsRefresh = false;
 
   function setLyricsStatus(message: string, loading = false) {
     lyricsStatus.className = loading
@@ -260,6 +263,12 @@ export function createMiniPlayerUI(
     for (const el of lyricLineEls) {
       el.style.display = "";
     }
+  }
+
+  function flushPendingLyricsRefresh() {
+    if (!pendingLyricsRefresh || lyricsUpdateSuspended) return;
+    pendingLyricsRefresh = false;
+    updateActiveLyricLine(true);
   }
 
   function getInterpolatedProgressMs(): number {
@@ -334,6 +343,11 @@ export function createMiniPlayerUI(
   }
 
   function updateActiveLyricLine(force = false) {
+    if (lyricsUpdateSuspended) {
+      pendingLyricsRefresh = true;
+      return;
+    }
+
     if (currentStyle !== "modern" || syncedLyrics.length === 0 || !currentState || currentState.trackUri !== lyricsTrackUri) {
       if (force && currentStyle === "modern") renderLyricsWindow();
       return;
@@ -356,6 +370,10 @@ export function createMiniPlayerUI(
     const shouldShowLyrics = currentStyle === "modern" && currentConnected && Boolean(currentState);
     lyricsSection.style.display = shouldShowLyrics ? "" : "none";
     if (!shouldShowLyrics) return;
+    if (lyricsUpdateSuspended) {
+      pendingLyricsRefresh = true;
+      return;
+    }
     updateActiveLyricLine(true);
     if (reposition && visible) applyPosition();
   }
@@ -701,6 +719,10 @@ export function createMiniPlayerUI(
     update,
     updateLyrics,
     setLyricsLoading,
+    setLyricsUpdateSuspended(suspended: boolean) {
+      lyricsUpdateSuspended = suspended;
+      if (!suspended) flushPendingLyricsRefresh();
+    },
     setStyle,
     setDevices,
     setVolume(percent: number) {
