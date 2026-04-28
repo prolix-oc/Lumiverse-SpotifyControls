@@ -502,6 +502,8 @@ export const PANEL_CSS = `
 /* Modern expanding widget player */
 .spotify-modern-widget-player {
   --spotify-modern-widget-collapsed-size: 48px;
+  --spotify-modern-expanded-surface: var(--lumiverse-fill);
+  --spotify-modern-expanded-surface-alt: var(--lumiverse-fill-subtle);
   width: 100%;
   height: 100%;
   position: relative;
@@ -524,6 +526,9 @@ export const PANEL_CSS = `
 
 .spotify-modern-widget-player[data-expanded="true"] {
   min-height: 420px;
+  background: linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
+  border-color: var(--lumiverse-border);
+  box-shadow: var(--lumiverse-shadow-xl);
 }
 
 .spotify-modern-widget-compact,
@@ -615,6 +620,7 @@ export const PANEL_CSS = `
   padding: 14px 14px 12px;
   box-sizing: border-box;
   min-height: 100%;
+  background: linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
 }
 
 .spotify-modern-widget-header,
@@ -735,31 +741,59 @@ export const PANEL_CSS = `
   gap: 5px;
 }
 
+.spotify-modern-widget-marquee {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.spotify-modern-widget-marquee[data-overflow="true"]::before,
+.spotify-modern-widget-marquee[data-overflow="true"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.spotify-modern-widget-marquee[data-overflow="true"]::before {
+  left: 0;
+  background: linear-gradient(90deg, var(--spotify-modern-expanded-surface) 20%, transparent 100%);
+}
+
+.spotify-modern-widget-marquee[data-overflow="true"]::after {
+  right: 0;
+  background: linear-gradient(270deg, var(--spotify-modern-expanded-surface) 20%, transparent 100%);
+}
+
+.spotify-modern-widget-marquee-content {
+  width: max-content;
+  min-width: 100%;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.spotify-modern-widget-marquee-animate {
+  animation: spotify-modern-marquee var(--spotify-modern-marquee-duration, 10s) ease-in-out infinite alternate;
+}
+
 .spotify-modern-widget-track {
   font-size: 20px;
-  line-height: 1.1;
+  line-height: 1.12;
   font-weight: 700;
   letter-spacing: -0.03em;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .spotify-modern-widget-artist {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.74);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .spotify-modern-widget-album {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.48);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .spotify-modern-widget-progress-row {
@@ -816,6 +850,15 @@ export const PANEL_CSS = `
   mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
 }
 
+.spotify-modern-widget-lyrics-track {
+  width: 100%;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  will-change: transform;
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .spotify-modern-widget-lyrics-status {
   text-align: center;
   font-size: 13px;
@@ -842,6 +885,11 @@ export const PANEL_CSS = `
 .spotify-modern-widget-lyric-line-enter {
   animation: spotify-lyrics-line-in 360ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
   animation-delay: var(--spotify-modern-lyric-enter-delay, 0ms);
+}
+
+.spotify-modern-widget-lyric-line-long {
+  max-width: calc(100% - 24px);
+  margin-inline: auto;
 }
 
 .spotify-modern-widget-lyric-line.active {
@@ -970,6 +1018,18 @@ export const PANEL_CSS = `
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.6);
   padding: 12px 8px;
+}
+
+@keyframes spotify-modern-marquee {
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+
+  88%,
+  100% {
+    transform: translateX(calc(-1 * var(--spotify-modern-marquee-distance, 0px)));
+  }
 }
 
 /* Empty state */

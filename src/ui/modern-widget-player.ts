@@ -1,6 +1,10 @@
 import type { PlaybackState } from "../types";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
-import { createSyncedLyricsModel, parseSyncedLyrics } from "./synced-lyrics-model";
+import {
+  createSyncedLyricsModel,
+  parseSyncedLyrics,
+  shouldReserveScaleGutter,
+} from "./synced-lyrics-model";
 
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
@@ -10,8 +14,6 @@ const ICON_VOLUME = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.
 const ICON_EXPAND = `<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>`;
 const ICON_COLLAPSE = `<svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>`;
 const ICON_NOTE = `<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
-const EMPTY_SYNCED_LINE_SYMBOL = "♪";
-
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const min = Math.floor(totalSec / 60);
@@ -31,6 +33,50 @@ function getCompactPlainLyricLines(lyrics: string | null): string[] {
 function stopEventPropagation(el: HTMLElement) {
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
   el.addEventListener("click", (e) => e.stopPropagation());
+}
+
+function createMarqueeLabel(baseClass: string) {
+  const root = document.createElement("div");
+  root.className = `${baseClass} spotify-modern-widget-marquee`;
+
+  const content = document.createElement("div");
+  content.className = `${baseClass}-content spotify-modern-widget-marquee-content`;
+  root.appendChild(content);
+
+  return {
+    root,
+    setText(value: string) {
+      content.textContent = value;
+      root.setAttribute("aria-label", value);
+    },
+    refresh(expanded: boolean, restart = false) {
+      if (!expanded) {
+        root.dataset.overflow = "false";
+        content.classList.remove("spotify-modern-widget-marquee-animate");
+        root.style.removeProperty("--spotify-modern-marquee-distance");
+        root.style.removeProperty("--spotify-modern-marquee-duration");
+        return;
+      }
+
+      const overflow = Math.ceil(content.scrollWidth - root.clientWidth);
+      if (overflow <= 6) {
+        root.dataset.overflow = "false";
+        content.classList.remove("spotify-modern-widget-marquee-animate");
+        root.style.removeProperty("--spotify-modern-marquee-distance");
+        root.style.removeProperty("--spotify-modern-marquee-duration");
+        return;
+      }
+
+      root.dataset.overflow = "true";
+      root.style.setProperty("--spotify-modern-marquee-distance", `${overflow}px`);
+      root.style.setProperty("--spotify-modern-marquee-duration", `${Math.max(8, Math.min(20, 8 + overflow / 18))}s`);
+      if (restart) {
+        content.classList.remove("spotify-modern-widget-marquee-animate");
+        content.offsetWidth;
+      }
+      content.classList.add("spotify-modern-widget-marquee-animate");
+    },
+  };
 }
 
 export interface ModernWidgetPlayerUI {
@@ -124,18 +170,13 @@ export function createModernWidgetPlayerUI(
   const meta = document.createElement("div");
   meta.className = "spotify-modern-widget-meta";
 
-  const trackName = document.createElement("div");
-  trackName.className = "spotify-modern-widget-track";
+  const trackName = createMarqueeLabel("spotify-modern-widget-track");
+  const artistName = createMarqueeLabel("spotify-modern-widget-artist");
+  const albumName = createMarqueeLabel("spotify-modern-widget-album");
 
-  const artistName = document.createElement("div");
-  artistName.className = "spotify-modern-widget-artist";
-
-  const albumName = document.createElement("div");
-  albumName.className = "spotify-modern-widget-album";
-
-  meta.appendChild(trackName);
-  meta.appendChild(artistName);
-  meta.appendChild(albumName);
+  meta.appendChild(trackName.root);
+  meta.appendChild(artistName.root);
+  meta.appendChild(albumName.root);
   hero.appendChild(heroArt.el);
   hero.appendChild(heroFallback);
   hero.appendChild(meta);
@@ -162,6 +203,9 @@ export function createModernWidgetPlayerUI(
   lyricsHeader.textContent = "Lyrics";
   const lyricsBody = document.createElement("div");
   lyricsBody.className = "spotify-modern-widget-lyrics-body";
+  const lyricsTrack = document.createElement("div");
+  lyricsTrack.className = "spotify-modern-widget-lyrics-track";
+  lyricsBody.appendChild(lyricsTrack);
   lyricsSection.appendChild(lyricsHeader);
   lyricsSection.appendChild(lyricsBody);
 
@@ -225,6 +269,32 @@ export function createModernWidgetPlayerUI(
   let lyricsLoading = false;
   let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
   let lastRenderedLyricSignature = "";
+  let syncedLyricEls: HTMLDivElement[] = [];
+  let lastMetadataSignature = "";
+  let marqueeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let marqueeRefreshTimerLate: ReturnType<typeof setTimeout> | null = null;
+
+  const marqueeObserver = new ResizeObserver(() => {
+    refreshMarquees(false);
+  });
+  marqueeObserver.observe(meta);
+  marqueeObserver.observe(root);
+
+  function refreshMarquees(restart: boolean) {
+    requestAnimationFrame(() => {
+      trackName.refresh(isExpandedState, restart);
+      artistName.refresh(isExpandedState, restart);
+      albumName.refresh(isExpandedState, restart);
+    });
+  }
+
+  function scheduleMarqueeRefresh(restart: boolean) {
+    if (marqueeRefreshTimer) clearTimeout(marqueeRefreshTimer);
+    if (marqueeRefreshTimerLate) clearTimeout(marqueeRefreshTimerLate);
+    refreshMarquees(restart);
+    marqueeRefreshTimer = setTimeout(() => refreshMarquees(restart), 180);
+    marqueeRefreshTimerLate = setTimeout(() => refreshMarquees(restart), 460);
+  }
 
   function renderCompactArt(trackArtUrl: string | null) {
     compactArt.setUrl(trackArtUrl);
@@ -241,15 +311,68 @@ export function createModernWidgetPlayerUI(
     return Math.min(lastProgressMs + Math.max(0, Date.now() - lastUpdateTime), currentDuration || Infinity);
   }
 
+  function clearLyricsTrack() {
+    lyricsTrack.innerHTML = "";
+    lyricsTrack.style.transform = "translateY(0px)";
+    syncedLyricEls = [];
+  }
+
+  function buildSyncedLyricsTrack() {
+    clearLyricsTrack();
+    const indexedLines = syncedLyricsModel.getIndexedLines();
+    syncedLyricEls = indexedLines.map((line, renderIndex) => {
+      const el = document.createElement("div");
+      el.className = "spotify-modern-widget-lyric-line spotify-modern-widget-lyric-line-enter";
+      el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 22, 110)}ms`);
+      if (shouldReserveScaleGutter(line.text)) {
+        el.classList.add("spotify-modern-widget-lyric-line-long");
+      }
+      el.textContent = line.displayText;
+      lyricsTrack.appendChild(el);
+      return el;
+    });
+  }
+
+  function updateSyncedLyricsPresentation() {
+    const activeLineIndex = syncedLyricsModel.getActiveLineIndex();
+    const indexedLines = syncedLyricsModel.getIndexedLines();
+    indexedLines.forEach((line, idx) => {
+      const el = syncedLyricEls[idx];
+      if (!el) return;
+      const distance = activeLineIndex < 0 ? line.index : Math.abs(line.index - activeLineIndex);
+      el.className = "spotify-modern-widget-lyric-line";
+      if (shouldReserveScaleGutter(line.text)) {
+        el.classList.add("spotify-modern-widget-lyric-line-long");
+      }
+      if (line.index === activeLineIndex) el.classList.add("active");
+      else if (distance === 1) el.classList.add("near");
+      else if (distance === 2) el.classList.add("mid");
+      else el.classList.add("far");
+    });
+
+    const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];
+    if (!activeEl) {
+      lyricsTrack.style.transform = "translateY(0px)";
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const targetOffset = activeEl.offsetTop + activeEl.offsetHeight / 2 - lyricsBody.clientHeight / 2;
+      const maxOffset = Math.max(0, lyricsTrack.scrollHeight - lyricsBody.clientHeight);
+      const clampedOffset = Math.max(0, Math.min(targetOffset, maxOffset));
+      lyricsTrack.style.transform = `translateY(${-clampedOffset}px)`;
+    });
+  }
+
   function renderLyrics() {
-    lyricsBody.innerHTML = "";
+    clearLyricsTrack();
 
     if (!connected || !state) {
       lastRenderedLyricSignature = "";
       const status = document.createElement("div");
       status.className = "spotify-modern-widget-lyrics-status";
       status.textContent = connected ? "Start playback to see lyrics" : "Connect Spotify to see lyrics";
-      lyricsBody.appendChild(status);
+      lyricsTrack.appendChild(status);
       return;
     }
 
@@ -258,7 +381,7 @@ export function createModernWidgetPlayerUI(
       const status = document.createElement("div");
       status.className = "spotify-modern-widget-lyrics-status spotify-modern-widget-lyrics-status-loading";
       status.textContent = "Loading lyrics...";
-      lyricsBody.appendChild(status);
+      lyricsTrack.appendChild(status);
       return;
     }
 
@@ -267,31 +390,15 @@ export function createModernWidgetPlayerUI(
       const status = document.createElement("div");
       status.className = "spotify-modern-widget-lyrics-status";
       status.textContent = "♪ Instrumental";
-      lyricsBody.appendChild(status);
+      lyricsTrack.appendChild(status);
       return;
     }
 
     if (syncedLyricsModel.hasLyrics() && state.trackUri === lyricsTrackUri) {
-      const snapshot = syncedLyricsModel.getSnapshot();
-      const nextSignature = snapshot.lines.map((line) => `${line.index}:${line.text}`).join("|");
-      const shouldAnimate = nextSignature !== lastRenderedLyricSignature;
+      const nextSignature = syncedLyricsModel.getIndexedLines().map((line) => `${line.index}:${line.text}`).join("|");
       lastRenderedLyricSignature = nextSignature;
-
-      snapshot.lines.forEach((line, renderIndex) => {
-        const el = document.createElement("div");
-        const distance = snapshot.activeLineIndex < 0 ? line.index : Math.abs(line.index - snapshot.activeLineIndex);
-        el.className = "spotify-modern-widget-lyric-line";
-        if (line.index === snapshot.activeLineIndex) el.classList.add("active");
-        else if (distance === 1) el.classList.add("near");
-        else if (distance === 2) el.classList.add("mid");
-        else el.classList.add("far");
-        if (shouldAnimate) {
-          el.classList.add("spotify-modern-widget-lyric-line-enter");
-          el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 26, 120)}ms`);
-        }
-        el.textContent = line.text;
-        lyricsBody.appendChild(el);
-      });
+      buildSyncedLyricsTrack();
+      updateSyncedLyricsPresentation();
       return;
     }
 
@@ -308,7 +415,7 @@ export function createModernWidgetPlayerUI(
           el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 20, 100)}ms`);
         }
         el.textContent = line;
-        lyricsBody.appendChild(el);
+        lyricsTrack.appendChild(el);
       });
       return;
     }
@@ -318,7 +425,7 @@ export function createModernWidgetPlayerUI(
     const status = document.createElement("div");
     status.className = "spotify-modern-widget-lyrics-status";
     status.textContent = "No lyrics available";
-    lyricsBody.appendChild(status);
+    lyricsTrack.appendChild(status);
   }
 
   function updateActiveLyricLine(force = false) {
@@ -335,8 +442,13 @@ export function createModernWidgetPlayerUI(
       updatedAt: Date.now(),
     });
 
-    if (force || syncedLyricsModel.refreshActiveLineIndex()) {
+    if (force) {
       renderLyrics();
+      return;
+    }
+
+    if (syncedLyricsModel.refreshActiveLineIndex()) {
+      updateSyncedLyricsPresentation();
     }
   }
 
@@ -411,9 +523,12 @@ export function createModernWidgetPlayerUI(
     renderHeroArt(artUrl);
 
     compactStatus.textContent = playbackState.isPlaying ? "Playing" : "Paused";
-    trackName.textContent = playbackState.trackName;
-    artistName.textContent = playbackState.artistName;
-    albumName.textContent = playbackState.albumName;
+    const metadataSignature = `${playbackState.trackName}|${playbackState.artistName}|${playbackState.albumName}`;
+    const metadataChanged = metadataSignature !== lastMetadataSignature;
+    lastMetadataSignature = metadataSignature;
+    trackName.setText(playbackState.trackName);
+    artistName.setText(playbackState.artistName);
+    albumName.setText(playbackState.albumName);
     hero.style.display = "grid";
     progressRow.style.display = "grid";
     lyricsSection.style.display = "grid";
@@ -441,14 +556,21 @@ export function createModernWidgetPlayerUI(
     progressTime.textContent = formatTime(playbackState.progressMs);
     durationTime.textContent = formatTime(playbackState.durationMs);
 
-    updateActiveLyricLine(true);
+    if (syncedLyricsModel.hasLyrics() && playbackState.trackUri === lyricsTrackUri) {
+      if (syncedLyricEls.length === 0) renderLyrics();
+      else updateActiveLyricLine();
+    } else if (lyricsTrack.childElementCount === 0) {
+      renderLyrics();
+    }
+    scheduleMarqueeRefresh(metadataChanged);
     if (playbackState.isPlaying) startTicking();
     else stopTicking();
   }
 
   function updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyricsText: string | null, instrumental: boolean) {
     lyricsTrackUri = trackUri;
-    syncedLyricsModel.setLyrics(parseSyncedLyrics(syncedLyricsText));
+    const parsedSyncedLyrics = parseSyncedLyrics(syncedLyricsText);
+    syncedLyricsModel.setLyrics(parsedSyncedLyrics);
     plainLyricLines = getCompactPlainLyricLines(plainLyrics);
     lyricsInstrumental = instrumental;
     lyricsLoading = false;
@@ -477,6 +599,7 @@ export function createModernWidgetPlayerUI(
     setExpanded(expandedValue: boolean) {
       isExpandedState = expandedValue;
       root.dataset.expanded = String(expandedValue);
+      scheduleMarqueeRefresh(true);
     },
     isExpanded() {
       return isExpandedState;
@@ -484,6 +607,9 @@ export function createModernWidgetPlayerUI(
     destroy() {
       stopTicking();
       if (volumeDebounce) clearTimeout(volumeDebounce);
+      if (marqueeRefreshTimer) clearTimeout(marqueeRefreshTimer);
+      if (marqueeRefreshTimerLate) clearTimeout(marqueeRefreshTimerLate);
+      marqueeObserver.disconnect();
       compactArt.destroy();
       heroArt.destroy();
       root.remove();

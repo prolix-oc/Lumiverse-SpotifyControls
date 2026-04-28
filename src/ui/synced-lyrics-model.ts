@@ -116,6 +116,15 @@ export function createSyncedLyricsModel(maxLines?: number) {
     return indexed.slice(start, start + maxLines);
   }
 
+  function getIndexedLines(): SyncedLyricsSnapshotLine[] {
+    return lyrics.map((line, index) => ({
+      ...line,
+      index,
+      displayText: getLineDisplayText(line.text),
+      hasText: Boolean(line.text),
+    }));
+  }
+
   return {
     clear() {
       lyrics = [];
@@ -137,6 +146,7 @@ export function createSyncedLyricsModel(maxLines?: number) {
     hasLyrics() {
       return lyrics.length > 0;
     },
+    getIndexedLines,
     getSnapshot(): SyncedLyricsSnapshot {
       refreshActiveLineIndex();
       return {
