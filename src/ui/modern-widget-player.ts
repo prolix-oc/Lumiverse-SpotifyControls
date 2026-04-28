@@ -47,32 +47,45 @@ function createMarqueeLabel(baseClass: string) {
   content.className = `${baseClass}-content spotify-modern-widget-marquee-content`;
   root.appendChild(content);
 
-  let marqueeStartTimer: ReturnType<typeof setTimeout> | null = null;
+  let marqueeCycleTimer: ReturnType<typeof setTimeout> | null = null;
 
   function stopMarquee() {
-    if (marqueeStartTimer) {
-      clearTimeout(marqueeStartTimer);
-      marqueeStartTimer = null;
+    if (marqueeCycleTimer) {
+      clearTimeout(marqueeCycleTimer);
+      marqueeCycleTimer = null;
     }
     root.dataset.marqueePhase = "idle";
     content.classList.remove("spotify-modern-widget-marquee-animate");
   }
 
-  function queueMarqueeStart(restart: boolean) {
-    if (marqueeStartTimer) {
-      clearTimeout(marqueeStartTimer);
-    }
-    root.dataset.marqueePhase = "rest";
+  function startMarqueePass(restart: boolean) {
+    root.dataset.marqueePhase = "scrolling";
     content.classList.remove("spotify-modern-widget-marquee-animate");
     if (restart) {
       content.offsetWidth;
     }
-    marqueeStartTimer = setTimeout(() => {
-      marqueeStartTimer = null;
-      root.dataset.marqueePhase = "scrolling";
-      content.classList.add("spotify-modern-widget-marquee-animate");
+    content.classList.add("spotify-modern-widget-marquee-animate");
+  }
+
+  function queueMarqueeStart(restart: boolean) {
+    if (marqueeCycleTimer) {
+      clearTimeout(marqueeCycleTimer);
+      marqueeCycleTimer = null;
+    }
+    root.dataset.marqueePhase = "rest";
+    content.classList.remove("spotify-modern-widget-marquee-animate");
+    marqueeCycleTimer = setTimeout(() => {
+      marqueeCycleTimer = null;
+      startMarqueePass(restart);
     }, MARQUEE_REST_MS);
   }
+
+  content.addEventListener("animationend", (event) => {
+    if (event.animationName !== "spotify-modern-marquee" || root.dataset.marqueePhase !== "scrolling") {
+      return;
+    }
+    queueMarqueeStart(true);
+  });
 
   return {
     root,
@@ -102,7 +115,7 @@ function createMarqueeLabel(baseClass: string) {
       root.style.setProperty("--spotify-modern-marquee-distance", `${overflow}px`);
       root.style.setProperty("--spotify-modern-marquee-duration", `${Math.max(8, Math.min(20, 8 + overflow / 18))}s`);
 
-      const isQueued = marqueeStartTimer !== null;
+      const isQueued = marqueeCycleTimer !== null;
       const isScrolling = root.dataset.marqueePhase === "scrolling";
       if (restart || (!isQueued && !isScrolling)) {
         queueMarqueeStart(restart);

@@ -847,7 +847,7 @@ export const PANEL_CSS = `
 }
 
 .spotify-modern-widget-marquee-animate {
-  animation: spotify-modern-marquee var(--spotify-modern-marquee-duration, 10s) ease-in-out infinite alternate;
+  animation: spotify-modern-marquee var(--spotify-modern-marquee-duration, 10s) ease-in-out 2 alternate;
 }
 
 .spotify-modern-widget-track {
@@ -988,6 +988,10 @@ export const PANEL_CSS = `
 .spotify-modern-widget-lyric-line.far,
 .spotify-modern-widget-lyric-line.plain {
   color: rgba(255, 255, 255, 0.24);
+}
+
+.spotify-modern-widget-lyric-line.plain {
+  color: rgba(255, 255, 255, 0.52);
 }
 
 .spotify-modern-widget-controls {
