@@ -496,6 +496,17 @@ export function setup(ctx: SpindleFrontendContext) {
   cleanups.push(() => miniPlayer.destroy());
   cleanups.push(() => modernWidget.destroy());
 
+  function syncWidgetVisibility() {
+    widget.root.style.display = connected ? "" : "none";
+    if (!connected) {
+      miniPlayer.hide();
+      modernWidgetExpanded = false;
+      modernWidget.setExpanded(false);
+    }
+  }
+
+  syncWidgetVisibility();
+
   // Sync volume between drawer controls and mini player
   controlsUI.onVolumeChange((pct) => miniPlayer.setVolume(pct));
   miniPlayer.onVolumeChange((pct) => controlsUI.setVolume(pct));
@@ -586,7 +597,7 @@ export function setup(ctx: SpindleFrontendContext) {
     openContextMenuCount += 1;
     miniPlayer.setUiSuspended(true);
 
-    let selectedKey: string | undefined;
+    let selectedKey: string | null | undefined;
     try {
       ({ selectedKey } = await ctx.ui.showContextMenu({
         position: { x, y },
@@ -700,6 +711,7 @@ export function setup(ctx: SpindleFrontendContext) {
     applyWidgetStyle();
     widget.root.appendChild(widgetContent);
     animateWidgetMount();
+    syncWidgetVisibility();
     widget.moveTo(pos.x, pos.y);
     widget.onDragEnd((pos) => debounceSavePosition(pos));
     clampWidgetPosition();
@@ -770,6 +782,7 @@ export function setup(ctx: SpindleFrontendContext) {
       case "state": {
         currentState = msg.playbackState;
         connected = msg.connected;
+        syncWidgetVisibility();
         nowPlayingUI.update(currentState, connected);
         controlsUI.update(currentState, connected);
         miniPlayer.update(currentState, connected);
@@ -814,6 +827,7 @@ export function setup(ctx: SpindleFrontendContext) {
       case "config":
         settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey, msg.callbackUrl);
         connected = msg.connected;
+        syncWidgetVisibility();
         break;
 
       case "search_results":
@@ -876,12 +890,14 @@ export function setup(ctx: SpindleFrontendContext) {
 
       case "connected":
         connected = true;
+        syncWidgetVisibility();
         sendToBackend({ type: "get_config" });
         sendToBackend({ type: "get_state" });
         break;
 
       case "disconnected":
         connected = false;
+        syncWidgetVisibility();
         currentState = null;
         lastThemeArtUrl = null;
         clearAlbumTheme();
@@ -926,6 +942,7 @@ export function setup(ctx: SpindleFrontendContext) {
     } else {
       currentState = null;
       connected = false;
+      syncWidgetVisibility();
       clearAlbumTheme();
       nowPlayingUI.update(null, false);
       controlsUI.update(null, false);

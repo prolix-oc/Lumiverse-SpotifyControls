@@ -752,6 +752,14 @@ export function createMiniPlayerUI(
     }
   }
 
+  function setVolume(percent: number) {
+    if (uiSuspended) {
+      pendingVolume = percent;
+      return;
+    }
+    volumeSlider.value = String(percent);
+  }
+
   return {
     root,
     update,
@@ -773,13 +781,7 @@ export function createMiniPlayerUI(
     },
     setStyle,
     setDevices,
-    setVolume(percent: number) {
-      if (uiSuspended) {
-        pendingVolume = percent;
-        return;
-      }
-      volumeSlider.value = String(percent);
-    },
+    setVolume,
     onVolumeChange(handler: (percent: number) => void) {
       volumeChangeHandlers.add(handler);
     },

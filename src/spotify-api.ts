@@ -5,36 +5,53 @@ import type { PlaybackState, SearchResult, TokenData, DeviceInfo, PlaylistResult
 const SPOTIFY_API = "https://api.spotify.com/v1";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 
-let tokenData: TokenData | null = null;
+const tokenDataByUser = new Map<string, TokenData | null>();
 let activeUserId: string | undefined;
 
 export function setActiveUser(userId: string) {
   activeUserId = userId;
 }
 
+function resolveUserId(userId?: string): string | undefined {
+  return userId || activeUserId;
+}
+
+function getTokenData(userId?: string): TokenData | null {
+  const resolvedUserId = resolveUserId(userId);
+  return resolvedUserId ? tokenDataByUser.get(resolvedUserId) ?? null : null;
+}
+
+function setTokenData(data: TokenData | null, userId?: string): string {
+  const resolvedUserId = resolveUserId(userId);
+  if (!resolvedUserId) throw new Error("Spotify user context is not set");
+  tokenDataByUser.set(resolvedUserId, data);
+  return resolvedUserId;
+}
+
 // ─── Token persistence ──────────────────────────────────────────────────
 
-export async function loadTokens(): Promise<void> {
+export async function loadTokens(userId?: string): Promise<void> {
+  const resolvedUserId = resolveUserId(userId);
   try {
-    const raw = await spindle.enclave.get("spotify_tokens", activeUserId);
-    tokenData = raw ? JSON.parse(raw) : null;
+    const raw = await spindle.enclave.get("spotify_tokens", resolvedUserId);
+    if (resolvedUserId) tokenDataByUser.set(resolvedUserId, raw ? JSON.parse(raw) : null);
   } catch {
-    tokenData = null;
+    if (resolvedUserId) tokenDataByUser.set(resolvedUserId, null);
   }
 }
 
-export async function saveTokens(data: TokenData): Promise<void> {
-  tokenData = data;
-  await spindle.enclave.put("spotify_tokens", JSON.stringify(data), activeUserId);
+export async function saveTokens(data: TokenData, userId?: string): Promise<void> {
+  const resolvedUserId = setTokenData(data, userId);
+  await spindle.enclave.put("spotify_tokens", JSON.stringify(data), resolvedUserId);
 }
 
-export async function clearTokens(): Promise<void> {
-  tokenData = null;
-  await spindle.enclave.delete("spotify_tokens", activeUserId);
+export async function clearTokens(userId?: string): Promise<void> {
+  const resolvedUserId = setTokenData(null, userId);
+  await spindle.enclave.delete("spotify_tokens", resolvedUserId);
 }
 
-export function isConnected(): boolean {
-  return tokenData !== null;
+export function isConnected(userId?: string): boolean {
+  return getTokenData(userId) !== null;
 }
 
 // ─── Auth helpers ────────────────────────────────────────────────────────
@@ -80,7 +97,8 @@ function formatSpotifyAuthError(action: string, status: number, body: string): s
  * Spotify Authorization Code Flow: POST /api/token with
  *   grant_type=refresh_token, refresh_token, Authorization: Basic header
  */
-async function refreshAccessToken(): Promise<string> {
+async function refreshAccessToken(userId?: string): Promise<string> {
+  const tokenData = getTokenData(userId);
   if (!tokenData) throw new Error("No tokens stored");
 
   const body = new URLSearchParams({
@@ -110,15 +128,16 @@ async function refreshAccessToken(): Promise<string> {
     client_id: tokenData.client_id,
     client_secret: tokenData.client_secret,
   };
-  await saveTokens(updated);
+  await saveTokens(updated, userId);
   return updated.access_token;
 }
 
-async function ensureToken(): Promise<string> {
+async function ensureToken(userId?: string): Promise<string> {
+  const tokenData = getTokenData(userId);
   if (!tokenData) throw new Error("Not connected to Spotify");
 
   if (Date.now() >= tokenData.expires_at) {
-    return refreshAccessToken();
+    return refreshAccessToken(userId);
   }
   return tokenData.access_token;
 }
@@ -127,9 +146,10 @@ async function ensureToken(): Promise<string> {
 
 async function spotifyFetch(
   endpoint: string,
-  options: { method?: string; body?: string } = {}
+  options: { method?: string; body?: string } = {},
+  userId?: string,
 ): Promise<{ status: number; body: string }> {
-  const token = await ensureToken();
+  const token = await ensureToken(userId);
 
   const res = (await spindle.cors(`${SPOTIFY_API}${endpoint}`, {
     method: options.method || "GET",
@@ -142,7 +162,7 @@ async function spotifyFetch(
 
   // Auto-refresh on 401 and retry once
   if (res.status === 401) {
-    const newToken = await refreshAccessToken();
+    const newToken = await refreshAccessToken(userId);
     return (await spindle.cors(`${SPOTIFY_API}${endpoint}`, {
       method: options.method || "GET",
       headers: {
@@ -158,19 +178,19 @@ async function spotifyFetch(
 
 // ─── Playback ────────────────────────────────────────────────────────────
 
-export async function getCurrentlyPlaying(): Promise<PlaybackState | null> {
-  const res = await spotifyFetch("/me/player/currently-playing");
+export async function getCurrentlyPlaying(userId?: string): Promise<PlaybackState | null> {
+  const res = await spotifyFetch("/me/player/currently-playing", {}, userId);
   if (res.status === 204 || !res.body || res.body.trim() === "") return null;
   if (res.status !== 200) return null;
 
   return parsePlaybackState(JSON.parse(res.body));
 }
 
-export async function getCurrentPlayback(): Promise<PlaybackState | null> {
+export async function getCurrentPlayback(userId?: string): Promise<PlaybackState | null> {
   // Always use /me/player (not /me/player/currently-playing) because the full
   // endpoint includes device data (volume, device name/type/id) that the
   // currently-playing endpoint omits.
-  const res = await spotifyFetch("/me/player");
+  const res = await spotifyFetch("/me/player", {}, userId);
   if (res.status === 204 || !res.body || res.body.trim() === "") return null;
   if (res.status !== 200) return null;
 
@@ -201,7 +221,7 @@ function parsePlaybackState(data: any): PlaybackState | null {
 export async function play(options?: {
   trackUri?: string;
   contextUri?: string;
-}): Promise<void> {
+}, userId?: string): Promise<void> {
   const body: Record<string, unknown> = {};
   if (options?.contextUri) body.context_uri = options.contextUri;
   if (options?.trackUri) body.uris = [options.trackUri];
@@ -209,47 +229,50 @@ export async function play(options?: {
   await spotifyFetch("/me/player/play", {
     method: "PUT",
     body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
-  });
+  }, userId);
 }
 
-export async function pause(): Promise<void> {
-  await spotifyFetch("/me/player/pause", { method: "PUT" });
+export async function pause(userId?: string): Promise<void> {
+  await spotifyFetch("/me/player/pause", { method: "PUT" }, userId);
 }
 
-export async function next(): Promise<void> {
-  await spotifyFetch("/me/player/next", { method: "POST" });
+export async function next(userId?: string): Promise<void> {
+  await spotifyFetch("/me/player/next", { method: "POST" }, userId);
 }
 
-export async function previous(): Promise<void> {
-  await spotifyFetch("/me/player/previous", { method: "POST" });
+export async function previous(userId?: string): Promise<void> {
+  await spotifyFetch("/me/player/previous", { method: "POST" }, userId);
 }
 
-export async function seek(positionMs: number): Promise<void> {
+export async function seek(positionMs: number, userId?: string): Promise<void> {
   await spotifyFetch(`/me/player/seek?position_ms=${positionMs}`, {
     method: "PUT",
-  });
+  }, userId);
 }
 
-export async function setVolume(percent: number): Promise<void> {
+export async function setVolume(percent: number, userId?: string): Promise<void> {
   await spotifyFetch(
     `/me/player/volume?volume_percent=${Math.round(Math.max(0, Math.min(100, percent)))}`,
-    { method: "PUT" }
+    { method: "PUT" },
+    userId,
   );
 }
 
-export async function setShuffle(state: boolean): Promise<void> {
-  await spotifyFetch(`/me/player/shuffle?state=${state}`, { method: "PUT" });
+export async function setShuffle(state: boolean, userId?: string): Promise<void> {
+  await spotifyFetch(`/me/player/shuffle?state=${state}`, { method: "PUT" }, userId);
 }
 
-export async function setRepeat(mode: "off" | "context" | "track"): Promise<void> {
-  await spotifyFetch(`/me/player/repeat?state=${mode}`, { method: "PUT" });
+export async function setRepeat(mode: "off" | "context" | "track", userId?: string): Promise<void> {
+  await spotifyFetch(`/me/player/repeat?state=${mode}`, { method: "PUT" }, userId);
 }
 
 // ─── Search ──────────────────────────────────────────────────────────────
 
-export async function search(query: string): Promise<SearchResult[]> {
+export async function search(query: string, userId?: string): Promise<SearchResult[]> {
   const res = await spotifyFetch(
-    `/search?q=${encodeURIComponent(query)}&type=track&limit=10`
+    `/search?q=${encodeURIComponent(query)}&type=track&limit=10`,
+    {},
+    userId,
   );
   if (res.status !== 200) return [];
 
@@ -269,16 +292,16 @@ export async function search(query: string): Promise<SearchResult[]> {
     });
 }
 
-export async function addToQueue(uri: string): Promise<void> {
+export async function addToQueue(uri: string, userId?: string): Promise<void> {
   await spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, {
     method: "POST",
-  });
+  }, userId);
 }
 
 // ─── Devices ──────────────────────────────────────────────────────────
 
-export async function getDevices(): Promise<DeviceInfo[]> {
-  const res = await spotifyFetch("/me/player/devices");
+export async function getDevices(userId?: string): Promise<DeviceInfo[]> {
+  const res = await spotifyFetch("/me/player/devices", {}, userId);
   if (res.status !== 200) return [];
 
   const data = JSON.parse(res.body);
@@ -291,11 +314,11 @@ export async function getDevices(): Promise<DeviceInfo[]> {
   }));
 }
 
-export async function transferPlayback(deviceId: string): Promise<void> {
+export async function transferPlayback(deviceId: string, userId?: string): Promise<void> {
   await spotifyFetch("/me/player", {
     method: "PUT",
     body: JSON.stringify({ device_ids: [deviceId], play: true }),
-  });
+  }, userId);
 }
 
 // ─── OAuth token exchange ────────────────────────────────────────────────
@@ -322,7 +345,8 @@ export async function getLyrics(
   trackName: string,
   artistName: string,
   albumName: string,
-  durationSec: number
+  durationSec: number,
+  _userId?: string,
 ): Promise<LyricsData | null> {
   // Try exact match first
   const params = new URLSearchParams({
@@ -427,8 +451,8 @@ export async function getPlaylistTracks(playlistId: string, limit = 20): Promise
 
 const LASTFM_API = "https://ws.audioscrobbler.com/2.0/";
 
-async function lastfmFetch(method: string, params: Record<string, string>): Promise<any> {
-  const lastfmApiKey = await spindle.enclave.get("lastfm_api_key", activeUserId);
+async function lastfmFetch(method: string, params: Record<string, string>, userId?: string): Promise<any> {
+  const lastfmApiKey = await spindle.enclave.get("lastfm_api_key", resolveUserId(userId));
   if (!lastfmApiKey) {
     throw new Error("Last.fm API key not configured. Please add it in the Spotify Controls settings.");
   }
@@ -457,13 +481,13 @@ export interface SimilarTrack {
   match: number;
 }
 
-export async function getSimilarTracks(track: string, artist: string, limit = 15): Promise<SimilarTrack[]> {
+export async function getSimilarTracks(track: string, artist: string, limit = 15, userId?: string): Promise<SimilarTrack[]> {
   const data = await lastfmFetch("track.getSimilar", {
     track,
     artist,
     autocorrect: "1",
     limit: String(limit),
-  });
+  }, userId);
   return (data.similartracks?.track || [])
     .map((t: any) => ({
       name: t.name,
@@ -473,32 +497,32 @@ export async function getSimilarTracks(track: string, artist: string, limit = 15
     .sort((a: SimilarTrack, b: SimilarTrack) => b.match - a.match);
 }
 
-export async function getSimilarArtists(artist: string, limit = 10): Promise<string[]> {
+export async function getSimilarArtists(artist: string, limit = 10, userId?: string): Promise<string[]> {
   const data = await lastfmFetch("artist.getSimilar", {
     artist,
     limit: String(limit),
-  });
+  }, userId);
   return (data.similarartists?.artist || []).map((a: any) => a.name);
 }
 
-export async function getTopTracksByTag(tag: string, limit = 15, page = 1): Promise<{ name: string; artist: string }[]> {
+export async function getTopTracksByTag(tag: string, limit = 15, page = 1, userId?: string): Promise<{ name: string; artist: string }[]> {
   const data = await lastfmFetch("tag.getTopTracks", {
     tag,
     limit: String(limit),
     page: String(page),
-  });
+  }, userId);
   return (data.tracks?.track || []).map((t: any) => ({
     name: t.name,
     artist: t.artist?.name || "",
   }));
 }
 
-export async function getTrackTopTags(track: string, artist: string): Promise<{ name: string; count: number }[]> {
+export async function getTrackTopTags(track: string, artist: string, userId?: string): Promise<{ name: string; count: number }[]> {
   const data = await lastfmFetch("track.getTopTags", {
     track,
     artist,
     autocorrect: "1",
-  });
+  }, userId);
   return (data.toptags?.tag || [])
     .map((t: any) => ({
       name: ((t.name as string) || "").toLowerCase().trim(),
@@ -507,11 +531,11 @@ export async function getTrackTopTags(track: string, artist: string): Promise<{ 
     .filter((t: { name: string; count: number }) => t.count > 0);
 }
 
-export async function getArtistTopTags(artist: string): Promise<{ name: string; count: number }[]> {
+export async function getArtistTopTags(artist: string, userId?: string): Promise<{ name: string; count: number }[]> {
   const data = await lastfmFetch("artist.getTopTags", {
     artist,
     autocorrect: "1",
-  });
+  }, userId);
   return (data.toptags?.tag || [])
     .map((t: any) => ({
       name: ((t.name as string) || "").toLowerCase().trim(),

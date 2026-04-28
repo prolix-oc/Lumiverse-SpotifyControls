@@ -3321,6 +3321,13 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       deviceList.appendChild(item);
     }
   }
+  function setVolume(percent) {
+    if (uiSuspended) {
+      pendingVolume = percent;
+      return;
+    }
+    volumeSlider.value = String(percent);
+  }
   return {
     root,
     update,
@@ -3344,13 +3351,7 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     },
     setStyle,
     setDevices,
-    setVolume(percent) {
-      if (uiSuspended) {
-        pendingVolume = percent;
-        return;
-      }
-      volumeSlider.value = String(percent);
-    },
+    setVolume,
     onVolumeChange(handler) {
       volumeChangeHandlers.add(handler);
     },
@@ -4662,6 +4663,15 @@ function setup(ctx) {
   miniPlayer.setStyle("default");
   cleanups.push(() => miniPlayer.destroy());
   cleanups.push(() => modernWidget.destroy());
+  function syncWidgetVisibility() {
+    widget.root.style.display = connected ? "" : "none";
+    if (!connected) {
+      miniPlayer.hide();
+      modernWidgetExpanded = false;
+      modernWidget.setExpanded(false);
+    }
+  }
+  syncWidgetVisibility();
   controlsUI.onVolumeChange((pct) => miniPlayer.setVolume(pct));
   miniPlayer.onVolumeChange((pct) => controlsUI.setVolume(pct));
   let didDrag = false;
@@ -4835,6 +4845,7 @@ function setup(ctx) {
     applyWidgetStyle();
     widget.root.appendChild(widgetContent);
     animateWidgetMount();
+    syncWidgetVisibility();
     widget.moveTo(pos.x, pos.y);
     widget.onDragEnd((pos2) => debounceSavePosition(pos2));
     clampWidgetPosition();
@@ -4890,6 +4901,7 @@ function setup(ctx) {
       case "state": {
         currentState = msg.playbackState;
         connected = msg.connected;
+        syncWidgetVisibility();
         nowPlayingUI.update(currentState, connected);
         controlsUI.update(currentState, connected);
         miniPlayer.update(currentState, connected);
@@ -4934,6 +4946,7 @@ function setup(ctx) {
       case "config":
         settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey, msg.callbackUrl);
         connected = msg.connected;
+        syncWidgetVisibility();
         break;
       case "search_results":
         searchUI.setResults(msg.results);
@@ -4981,11 +4994,13 @@ function setup(ctx) {
       }
       case "connected":
         connected = true;
+        syncWidgetVisibility();
         sendToBackend({ type: "get_config" });
         sendToBackend({ type: "get_state" });
         break;
       case "disconnected":
         connected = false;
+        syncWidgetVisibility();
         currentState = null;
         lastThemeArtUrl = null;
         clearAlbumTheme();
@@ -5025,6 +5040,7 @@ function setup(ctx) {
     } else {
       currentState = null;
       connected = false;
+      syncWidgetVisibility();
       clearAlbumTheme();
       nowPlayingUI.update(null, false);
       controlsUI.update(null, false);

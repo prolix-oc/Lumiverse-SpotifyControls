@@ -2,29 +2,46 @@
 // src/spotify-api.ts
 var SPOTIFY_API = "https://api.spotify.com/v1";
 var SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
-var tokenData = null;
+var tokenDataByUser = new Map;
 var activeUserId;
 function setActiveUser(userId) {
   activeUserId = userId;
 }
-async function loadTokens() {
+function resolveUserId(userId) {
+  return userId || activeUserId;
+}
+function getTokenData(userId) {
+  const resolvedUserId = resolveUserId(userId);
+  return resolvedUserId ? tokenDataByUser.get(resolvedUserId) ?? null : null;
+}
+function setTokenData(data, userId) {
+  const resolvedUserId = resolveUserId(userId);
+  if (!resolvedUserId)
+    throw new Error("Spotify user context is not set");
+  tokenDataByUser.set(resolvedUserId, data);
+  return resolvedUserId;
+}
+async function loadTokens(userId) {
+  const resolvedUserId = resolveUserId(userId);
   try {
-    const raw = await spindle.enclave.get("spotify_tokens", activeUserId);
-    tokenData = raw ? JSON.parse(raw) : null;
+    const raw = await spindle.enclave.get("spotify_tokens", resolvedUserId);
+    if (resolvedUserId)
+      tokenDataByUser.set(resolvedUserId, raw ? JSON.parse(raw) : null);
   } catch {
-    tokenData = null;
+    if (resolvedUserId)
+      tokenDataByUser.set(resolvedUserId, null);
   }
 }
-async function saveTokens(data) {
-  tokenData = data;
-  await spindle.enclave.put("spotify_tokens", JSON.stringify(data), activeUserId);
+async function saveTokens(data, userId) {
+  const resolvedUserId = setTokenData(data, userId);
+  await spindle.enclave.put("spotify_tokens", JSON.stringify(data), resolvedUserId);
 }
-async function clearTokens() {
-  tokenData = null;
-  await spindle.enclave.delete("spotify_tokens", activeUserId);
+async function clearTokens(userId) {
+  const resolvedUserId = setTokenData(null, userId);
+  await spindle.enclave.delete("spotify_tokens", resolvedUserId);
 }
-function isConnected() {
-  return tokenData !== null;
+function isConnected(userId) {
+  return getTokenData(userId) !== null;
 }
 function basicAuthHeader(clientId, clientSecret) {
   return "Basic " + btoa(`${clientId}:${clientSecret}`);
@@ -49,7 +66,8 @@ function formatSpotifyAuthError(action, status, body) {
   } catch {}
   return `${action} failed (${status}): ${body}`;
 }
-async function refreshAccessToken() {
+async function refreshAccessToken(userId) {
+  const tokenData = getTokenData(userId);
   if (!tokenData)
     throw new Error("No tokens stored");
   const body = new URLSearchParams({
@@ -75,19 +93,20 @@ async function refreshAccessToken() {
     client_id: tokenData.client_id,
     client_secret: tokenData.client_secret
   };
-  await saveTokens(updated);
+  await saveTokens(updated, userId);
   return updated.access_token;
 }
-async function ensureToken() {
+async function ensureToken(userId) {
+  const tokenData = getTokenData(userId);
   if (!tokenData)
     throw new Error("Not connected to Spotify");
   if (Date.now() >= tokenData.expires_at) {
-    return refreshAccessToken();
+    return refreshAccessToken(userId);
   }
   return tokenData.access_token;
 }
-async function spotifyFetch(endpoint, options = {}) {
-  const token = await ensureToken();
+async function spotifyFetch(endpoint, options = {}, userId) {
+  const token = await ensureToken(userId);
   const res = await spindle.cors(`${SPOTIFY_API}${endpoint}`, {
     method: options.method || "GET",
     headers: {
@@ -97,7 +116,7 @@ async function spotifyFetch(endpoint, options = {}) {
     body: options.body
   });
   if (res.status === 401) {
-    const newToken = await refreshAccessToken();
+    const newToken = await refreshAccessToken(userId);
     return await spindle.cors(`${SPOTIFY_API}${endpoint}`, {
       method: options.method || "GET",
       headers: {
@@ -109,8 +128,8 @@ async function spotifyFetch(endpoint, options = {}) {
   }
   return res;
 }
-async function getCurrentPlayback() {
-  const res = await spotifyFetch("/me/player");
+async function getCurrentPlayback(userId) {
+  const res = await spotifyFetch("/me/player", {}, userId);
   if (res.status === 204 || !res.body || res.body.trim() === "")
     return null;
   if (res.status !== 200)
@@ -138,7 +157,7 @@ function parsePlaybackState(data) {
     deviceId: data.device?.id || null
   };
 }
-async function play(options) {
+async function play(options, userId) {
   const body = {};
   if (options?.contextUri)
     body.context_uri = options.contextUri;
@@ -147,33 +166,33 @@ async function play(options) {
   await spotifyFetch("/me/player/play", {
     method: "PUT",
     body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
-  });
+  }, userId);
 }
-async function pause() {
-  await spotifyFetch("/me/player/pause", { method: "PUT" });
+async function pause(userId) {
+  await spotifyFetch("/me/player/pause", { method: "PUT" }, userId);
 }
-async function next() {
-  await spotifyFetch("/me/player/next", { method: "POST" });
+async function next(userId) {
+  await spotifyFetch("/me/player/next", { method: "POST" }, userId);
 }
-async function previous() {
-  await spotifyFetch("/me/player/previous", { method: "POST" });
+async function previous(userId) {
+  await spotifyFetch("/me/player/previous", { method: "POST" }, userId);
 }
-async function seek(positionMs) {
+async function seek(positionMs, userId) {
   await spotifyFetch(`/me/player/seek?position_ms=${positionMs}`, {
     method: "PUT"
-  });
+  }, userId);
 }
-async function setVolume(percent) {
-  await spotifyFetch(`/me/player/volume?volume_percent=${Math.round(Math.max(0, Math.min(100, percent)))}`, { method: "PUT" });
+async function setVolume(percent, userId) {
+  await spotifyFetch(`/me/player/volume?volume_percent=${Math.round(Math.max(0, Math.min(100, percent)))}`, { method: "PUT" }, userId);
 }
-async function setShuffle(state) {
-  await spotifyFetch(`/me/player/shuffle?state=${state}`, { method: "PUT" });
+async function setShuffle(state, userId) {
+  await spotifyFetch(`/me/player/shuffle?state=${state}`, { method: "PUT" }, userId);
 }
-async function setRepeat(mode) {
-  await spotifyFetch(`/me/player/repeat?state=${mode}`, { method: "PUT" });
+async function setRepeat(mode, userId) {
+  await spotifyFetch(`/me/player/repeat?state=${mode}`, { method: "PUT" }, userId);
 }
-async function search(query) {
-  const res = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track&limit=10`);
+async function search(query, userId) {
+  const res = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track&limit=10`, {}, userId);
   if (res.status !== 200)
     return [];
   const data = JSON.parse(res.body);
@@ -189,13 +208,13 @@ async function search(query) {
     };
   });
 }
-async function addToQueue(uri) {
+async function addToQueue(uri, userId) {
   await spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, {
     method: "POST"
-  });
+  }, userId);
 }
-async function getDevices() {
-  const res = await spotifyFetch("/me/player/devices");
+async function getDevices(userId) {
+  const res = await spotifyFetch("/me/player/devices", {}, userId);
   if (res.status !== 200)
     return [];
   const data = JSON.parse(res.body);
@@ -207,14 +226,14 @@ async function getDevices() {
     volume: d.volume_percent ?? null
   }));
 }
-async function transferPlayback(deviceId) {
+async function transferPlayback(deviceId, userId) {
   await spotifyFetch("/me/player", {
     method: "PUT",
     body: JSON.stringify({ device_ids: [deviceId], play: true })
-  });
+  }, userId);
 }
 var LRCLIB_API = "https://lrclib.net/api";
-async function getLyrics(trackName, artistName, albumName, durationSec) {
+async function getLyrics(trackName, artistName, albumName, durationSec, _userId) {
   const params = new URLSearchParams({
     track_name: trackName,
     artist_name: artistName,
@@ -275,8 +294,8 @@ async function searchPlaylists(query, limit = 15) {
   });
 }
 var LASTFM_API = "https://ws.audioscrobbler.com/2.0/";
-async function lastfmFetch(method, params) {
-  const lastfmApiKey = await spindle.enclave.get("lastfm_api_key", activeUserId);
+async function lastfmFetch(method, params, userId) {
+  const lastfmApiKey = await spindle.enclave.get("lastfm_api_key", resolveUserId(userId));
   if (!lastfmApiKey) {
     throw new Error("Last.fm API key not configured. Please add it in the Spotify Controls settings.");
   }
@@ -294,53 +313,53 @@ async function lastfmFetch(method, params) {
   }
   return JSON.parse(res.body);
 }
-async function getSimilarTracks(track, artist, limit = 15) {
+async function getSimilarTracks(track, artist, limit = 15, userId) {
   const data = await lastfmFetch("track.getSimilar", {
     track,
     artist,
     autocorrect: "1",
     limit: String(limit)
-  });
+  }, userId);
   return (data.similartracks?.track || []).map((t) => ({
     name: t.name,
     artist: t.artist?.name || "",
     match: parseFloat(t.match) || 0
   })).sort((a, b) => b.match - a.match);
 }
-async function getSimilarArtists(artist, limit = 10) {
+async function getSimilarArtists(artist, limit = 10, userId) {
   const data = await lastfmFetch("artist.getSimilar", {
     artist,
     limit: String(limit)
-  });
+  }, userId);
   return (data.similarartists?.artist || []).map((a) => a.name);
 }
-async function getTopTracksByTag(tag, limit = 15, page = 1) {
+async function getTopTracksByTag(tag, limit = 15, page = 1, userId) {
   const data = await lastfmFetch("tag.getTopTracks", {
     tag,
     limit: String(limit),
     page: String(page)
-  });
+  }, userId);
   return (data.tracks?.track || []).map((t) => ({
     name: t.name,
     artist: t.artist?.name || ""
   }));
 }
-async function getTrackTopTags(track, artist) {
+async function getTrackTopTags(track, artist, userId) {
   const data = await lastfmFetch("track.getTopTags", {
     track,
     artist,
     autocorrect: "1"
-  });
+  }, userId);
   return (data.toptags?.tag || []).map((t) => ({
     name: (t.name || "").toLowerCase().trim(),
     count: parseInt(t.count) || 0
   })).filter((t) => t.count > 0);
 }
-async function getArtistTopTags(artist) {
+async function getArtistTopTags(artist, userId) {
   const data = await lastfmFetch("artist.getTopTags", {
     artist,
     autocorrect: "1"
-  });
+  }, userId);
   return (data.toptags?.tag || []).map((t) => ({
     name: (t.name || "").toLowerCase().trim(),
     count: parseInt(t.count) || 0
@@ -375,16 +394,39 @@ async function exchangeCodeForTokens(code, redirectUri, clientId, clientSecret, 
 }
 
 // src/backend.ts
-var pollingInterval = null;
-var pollingGeneration = 0;
 var activeUserId2 = null;
-var pendingOAuth = null;
+var sessions = new Map;
+var pendingOAuthByState = new Map;
 function send(msg, userId) {
   spindle.sendToFrontend(msg, userId);
 }
+function getSession(userId) {
+  let session = sessions.get(userId);
+  if (!session) {
+    session = {
+      pollingInterval: null,
+      pollingGeneration: 0,
+      nullStateRetries: 0,
+      lastState: null,
+      lastStateUpdatedAt: 0,
+      cachedLyrics: null,
+      initialized: false
+    };
+    sessions.set(userId, session);
+  }
+  return session;
+}
+function syncActiveUserState(userId) {
+  activeUserId2 = userId;
+  setActiveUser(userId);
+  const session = getSession(userId);
+  lastState = session.lastState;
+  lastStateUpdatedAt = session.lastStateUpdatedAt;
+}
 async function loadConfig(userId) {
-  const stored = await spindle.storage.getJson("config.json", {
-    fallback: { clientId: "" }
+  const stored = await spindle.userStorage.getJson("config.json", {
+    fallback: { clientId: "" },
+    userId
   });
   const [clientSecret, lastfmApiKey] = await Promise.all([
     spindle.enclave.get("client_secret", userId),
@@ -397,7 +439,7 @@ async function loadConfig(userId) {
   };
 }
 async function saveConfig(config, userId) {
-  await spindle.storage.setJson("config.json", { clientId: config.clientId });
+  await spindle.userStorage.setJson("config.json", { clientId: config.clientId }, { userId });
   await Promise.all([
     config.clientSecret ? spindle.enclave.put("client_secret", config.clientSecret, userId) : spindle.enclave.delete("client_secret", userId),
     config.lastfmApiKey ? spindle.enclave.put("lastfm_api_key", config.lastfmApiKey, userId) : Promise.resolve()
@@ -427,14 +469,20 @@ function getLoopbackRedirectUri(serverBaseUrl) {
 var MIGRATION_FLAG = "enclave_migration_done.json";
 async function migrateToEnclave(userId) {
   try {
-    const done = await spindle.storage.getJson(MIGRATION_FLAG, {
-      fallback: { done: false }
+    const done = await spindle.userStorage.getJson(MIGRATION_FLAG, {
+      fallback: { done: false },
+      userId
     });
     if (done.done)
       return;
-    const oldConfig = await spindle.storage.getJson("config.json", {
+    const oldUserConfig = await spindle.userStorage.getJson("config.json", {
+      fallback: { clientId: "", clientSecret: "" },
+      userId
+    });
+    const oldSharedConfig = await spindle.storage.getJson("config.json", {
       fallback: { clientId: "", clientSecret: "" }
     });
+    const oldConfig = oldUserConfig.clientId || oldUserConfig.clientSecret || oldUserConfig.lastfmApiKey ? oldUserConfig : oldSharedConfig;
     if (oldConfig.clientSecret || oldConfig.lastfmApiKey) {
       if (oldConfig.clientSecret) {
         await spindle.enclave.put("client_secret", oldConfig.clientSecret, userId);
@@ -442,7 +490,7 @@ async function migrateToEnclave(userId) {
       if (oldConfig.lastfmApiKey) {
         await spindle.enclave.put("lastfm_api_key", oldConfig.lastfmApiKey, userId);
       }
-      await spindle.storage.setJson("config.json", { clientId: oldConfig.clientId });
+      await spindle.userStorage.setJson("config.json", { clientId: oldConfig.clientId }, { userId });
       spindle.log.info("Migrated config secrets to secure enclave");
     }
     try {
@@ -453,23 +501,26 @@ async function migrateToEnclave(userId) {
         spindle.log.info("Migrated OAuth tokens to secure enclave");
       }
     } catch {}
-    await spindle.storage.setJson(MIGRATION_FLAG, { done: true });
+    await spindle.userStorage.setJson(MIGRATION_FLAG, { done: true }, { userId });
   } catch (err) {
     spindle.log.warn(`Enclave migration: ${err?.message}`);
   }
 }
 async function handleUserChange(userId) {
-  if (activeUserId2 === userId)
-    return;
-  activeUserId2 = userId;
-  setActiveUser(userId);
-  await migrateToEnclave(userId);
-  await loadCachedState(userId);
-  await loadTokens();
-  if (isConnected()) {
-    startPolling();
+  const session = getSession(userId);
+  if (!session.initialized) {
+    await migrateToEnclave(userId);
+    await loadCachedState(userId);
+    await loadTokens(userId);
+    session.initialized = true;
+  }
+  if (activeUserId2 === userId || !activeUserId2 || isConnected(userId)) {
+    syncActiveUserState(userId);
+  }
+  if (isConnected(userId)) {
+    startPolling(userId);
   } else {
-    stopPolling();
+    stopPolling(userId);
   }
 }
 var DEFAULT_SIZE_PRESETS = { small: 36, medium: 48, large: 64 };
@@ -523,75 +574,80 @@ function normalizeWidgetPrefs(prefs) {
 var lastState = null;
 var lastStateUpdatedAt = 0;
 async function loadCachedState(userId) {
+  const session = getSession(userId);
   try {
-    lastState = await spindle.userStorage.getJson("last_state.json", { userId });
-    lastStateUpdatedAt = 0;
+    session.lastState = await spindle.userStorage.getJson("last_state.json", { userId });
+    session.lastStateUpdatedAt = 0;
   } catch {
-    lastState = null;
-    lastStateUpdatedAt = 0;
+    session.lastState = null;
+    session.lastStateUpdatedAt = 0;
   }
+  if (activeUserId2 === userId)
+    syncActiveUserState(userId);
 }
-async function cacheState(state) {
-  lastState = state;
-  lastStateUpdatedAt = state ? Date.now() : 0;
-  if (!activeUserId2)
-    return;
+async function cacheState(userId, state) {
+  const session = getSession(userId);
+  session.lastState = state;
+  session.lastStateUpdatedAt = state ? Date.now() : 0;
+  if (activeUserId2 === userId)
+    syncActiveUserState(userId);
   if (state) {
-    await spindle.userStorage.setJson("last_state.json", state, { userId: activeUserId2 }).catch(() => {});
+    await spindle.userStorage.setJson("last_state.json", state, { userId }).catch(() => {});
   } else {
-    await spindle.userStorage.delete("last_state.json", activeUserId2).catch(() => {});
+    await spindle.userStorage.delete("last_state.json", userId).catch(() => {});
   }
 }
 spindle.permissions.onChanged(({ permission, granted }) => {
   if (permission !== "cors_proxy")
     return;
-  if (granted && isConnected()) {
-    startPolling();
+  if (granted) {
+    for (const userId of sessions.keys()) {
+      if (isConnected(userId))
+        startPolling(userId);
+    }
   } else if (!granted) {
-    stopPolling();
-    if (activeUserId2) {
-      send({ type: "state", playbackState: null, connected: false }, activeUserId2);
+    for (const userId of sessions.keys()) {
+      stopPolling(userId);
+      send({ type: "state", playbackState: null, connected: false }, userId);
     }
   }
 });
 var POLL_ACTIVE_MS = 5000;
 var POLL_PAUSED_MS = 15000;
-function startPolling() {
-  stopPolling();
-  if (!activeUserId2)
-    return;
-  pollingGeneration += 1;
-  const generation = pollingGeneration;
-  const userId = activeUserId2;
+function startPolling(userId) {
+  stopPolling(userId);
+  const session = getSession(userId);
+  session.pollingGeneration += 1;
+  const generation = session.pollingGeneration;
   scheduleNextPoll(userId);
   primePlaybackState(generation, userId);
 }
-var nullStateRetries = 0;
 var MAX_NULL_RETRIES = 3;
 function scheduleNextPoll(userId) {
-  const useFastPoll = lastState?.isPlaying || nullStateRetries > 0;
+  const session = getSession(userId);
+  const useFastPoll = session.lastState?.isPlaying || session.nullStateRetries > 0;
   const interval = useFastPoll ? POLL_ACTIVE_MS : POLL_PAUSED_MS;
-  pollingInterval = setTimeout(async () => {
-    if (!isConnected()) {
+  session.pollingInterval = setTimeout(async () => {
+    if (!isConnected(userId)) {
       scheduleNextPoll(userId);
       return;
     }
-    const previousUri = lastState?.trackUri ?? null;
+    const previousUri = session.lastState?.trackUri ?? null;
     try {
-      const state = await getCurrentPlayback();
+      const state = await getCurrentPlayback(userId);
       if (!state && previousUri) {
-        nullStateRetries = Math.min(nullStateRetries + 1, MAX_NULL_RETRIES);
+        session.nullStateRetries = Math.min(session.nullStateRetries + 1, MAX_NULL_RETRIES);
       } else {
-        nullStateRetries = 0;
+        session.nullStateRetries = 0;
       }
-      cacheState(state);
+      await cacheState(userId, state);
       send({ type: "state", playbackState: state, connected: true }, userId);
       if (state && previousUri && state.trackUri !== previousUri) {
         setTimeout(async () => {
           try {
-            const fresh = await getCurrentPlayback();
+            const fresh = await getCurrentPlayback(userId);
             if (fresh) {
-              cacheState(fresh);
+              await cacheState(userId, fresh);
               send({ type: "state", playbackState: fresh, connected: true }, userId);
             }
           } catch {}
@@ -603,17 +659,18 @@ function scheduleNextPoll(userId) {
     scheduleNextPoll(userId);
   }, interval);
 }
-function stopPolling() {
-  if (pollingInterval) {
-    clearTimeout(pollingInterval);
-    pollingInterval = null;
+function stopPolling(userId) {
+  const session = getSession(userId);
+  if (session.pollingInterval) {
+    clearTimeout(session.pollingInterval);
+    session.pollingInterval = null;
   }
-  pollingGeneration += 1;
+  session.pollingGeneration += 1;
 }
 async function pushStateUpdate(userId) {
   try {
-    const state = await getCurrentPlayback();
-    cacheState(state);
+    const state = await getCurrentPlayback(userId);
+    await cacheState(userId, state);
     send({ type: "state", playbackState: state, connected: true }, userId);
     return state;
   } catch {
@@ -621,12 +678,13 @@ async function pushStateUpdate(userId) {
   }
 }
 async function primePlaybackState(generation, userId) {
+  const session = getSession(userId);
   const retryDelays = [0, 1000, 3000];
   for (const delay of retryDelays) {
     if (delay > 0) {
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
-    if (generation !== pollingGeneration || !isConnected()) {
+    if (generation !== session.pollingGeneration || !isConnected(userId)) {
       return;
     }
     const state = await pushStateUpdate(userId);
@@ -640,11 +698,11 @@ function pushStateAfterCommand(userId, expectTrackChange = false) {
     setTimeout(() => pushStateUpdate(userId), 300);
     return;
   }
-  const previousUri = lastState?.trackUri ?? null;
+  const previousUri = getSession(userId).lastState?.trackUri ?? null;
   const retryAt = [300, 900, 1800, 3500];
   for (const delay of retryAt) {
     setTimeout(async () => {
-      if (lastState?.trackUri !== previousUri)
+      if (getSession(userId).lastState?.trackUri !== previousUri)
         return;
       await pushStateUpdate(userId);
     }, delay);
@@ -652,6 +710,7 @@ function pushStateAfterCommand(userId, expectTrackChange = false) {
 }
 async function completeOAuthCallback(params) {
   const { code, state, error } = params;
+  const pendingOAuth = state ? pendingOAuthByState.get(state) ?? null : null;
   const pendingUserId = pendingOAuth?.userId;
   if (error) {
     spindle.log.error(`Spotify OAuth error: ${error}`);
@@ -663,18 +722,18 @@ async function completeOAuthCallback(params) {
   if (!code) {
     return { html: errorPage("OAuth callback did not include an authorization code.") };
   }
-  if (!pendingOAuth || state !== pendingOAuth.state) {
+  if (!pendingOAuth) {
     return { html: errorPage("Invalid or expired OAuth state. Please try connecting again.") };
   }
   const { redirectUri, clientId, clientSecret, codeVerifier, userId: oauthUserId } = pendingOAuth;
-  pendingOAuth = null;
+  pendingOAuthByState.delete(state);
   try {
-    setActiveUser(oauthUserId);
-    activeUserId2 = oauthUserId;
+    syncActiveUserState(oauthUserId);
     const tokens = await exchangeCodeForTokens(code, redirectUri, clientId, clientSecret, codeVerifier);
-    await saveTokens(tokens);
+    await saveTokens(tokens, oauthUserId);
+    getSession(oauthUserId).initialized = true;
     send({ type: "connected" }, oauthUserId);
-    startPolling();
+    startPolling(oauthUserId);
     return { html: successPage() };
   } catch (err) {
     spindle.log.error(`OAuth token exchange failed: ${err?.message}`);
@@ -719,15 +778,16 @@ spindle.onFrontendMessage(async (raw, userId) => {
   try {
     switch (msg.type) {
       case "get_state": {
-        if (lastState && isConnected()) {
-          send({ type: "state", playbackState: lastState, connected: true }, userId);
+        const session = getSession(userId);
+        if (session.lastState && isConnected(userId)) {
+          send({ type: "state", playbackState: session.lastState, connected: true }, userId);
         }
-        const playbackState = isConnected() ? await getCurrentPlayback() : null;
-        cacheState(playbackState);
+        const playbackState = isConnected(userId) ? await getCurrentPlayback(userId) : null;
+        await cacheState(userId, playbackState);
         send({
           type: "state",
           playbackState,
-          connected: isConnected()
+          connected: isConnected(userId)
         }, userId);
         break;
       }
@@ -737,7 +797,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           type: "config",
           clientId: config.clientId,
           hasSecret: !!config.clientSecret,
-          connected: isConnected(),
+          connected: isConnected(userId),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey
         }, userId);
@@ -751,7 +811,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         const codeVerifier = createCodeVerifier();
         const codeChallenge = await createCodeChallenge(codeVerifier);
         const redirectUri = getLoopbackRedirectUri(serverBaseUrl);
-        pendingOAuth = { state, redirectUri, clientId, clientSecret: clientSecret || undefined, codeVerifier, userId };
+        pendingOAuthByState.set(state, { state, redirectUri, clientId, clientSecret: clientSecret || undefined, codeVerifier, userId });
         const scopes = "user-read-playback-state user-modify-playback-state user-read-currently-playing";
         const params = new URLSearchParams({
           response_type: "code",
@@ -773,9 +833,17 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       }
       case "disconnect": {
-        stopPolling();
-        await clearTokens();
-        await spindle.theme.clear().catch(() => {});
+        stopPolling(userId);
+        await clearTokens(userId);
+        await spindle.theme.clear(userId).catch(() => {});
+        const session = getSession(userId);
+        session.cachedLyrics = null;
+        await cacheState(userId, null);
+        if (activeUserId2 === userId) {
+          activeUserId2 = null;
+          lastState = null;
+          lastStateUpdatedAt = 0;
+        }
         send({ type: "disconnected" }, userId);
         send({ type: "state", playbackState: null, connected: false }, userId);
         break;
@@ -784,55 +852,55 @@ spindle.onFrontendMessage(async (raw, userId) => {
         await play({
           trackUri: msg.trackUri,
           contextUri: msg.contextUri
-        });
+        }, userId);
         pushStateAfterCommand(userId);
         break;
       case "pause":
-        await pause();
+        await pause(userId);
         pushStateAfterCommand(userId);
         break;
       case "next":
-        await next();
+        await next(userId);
         pushStateAfterCommand(userId, true);
         break;
       case "previous":
-        await previous();
+        await previous(userId);
         pushStateAfterCommand(userId, true);
         break;
       case "seek":
-        await seek(msg.positionMs);
+        await seek(msg.positionMs, userId);
         pushStateAfterCommand(userId);
         break;
       case "set_volume":
-        await setVolume(msg.percent);
+        await setVolume(msg.percent, userId);
         pushStateAfterCommand(userId);
         break;
       case "toggle_shuffle": {
-        const state = await getCurrentPlayback();
+        const state = await getCurrentPlayback(userId);
         if (state)
-          await setShuffle(!state.shuffleState);
+          await setShuffle(!state.shuffleState, userId);
         pushStateAfterCommand(userId);
         break;
       }
       case "set_repeat":
-        await setRepeat(msg.mode);
+        await setRepeat(msg.mode, userId);
         pushStateAfterCommand(userId);
         break;
       case "search": {
-        const results = await search(msg.query);
+        const results = await search(msg.query, userId);
         send({ type: "search_results", results }, userId);
         break;
       }
       case "queue":
-        await addToQueue(msg.trackUri);
+        await addToQueue(msg.trackUri, userId);
         break;
       case "get_devices": {
-        const devices = await getDevices();
+        const devices = await getDevices(userId);
         send({ type: "devices", devices }, userId);
         break;
       }
       case "transfer_playback":
-        await transferPlayback(msg.deviceId);
+        await transferPlayback(msg.deviceId, userId);
         pushStateAfterCommand(userId);
         break;
       case "save_lastfm_key": {
@@ -843,7 +911,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           type: "config",
           clientId: config.clientId,
           hasSecret: !!config.clientSecret,
-          connected: isConnected(),
+          connected: isConnected(userId),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey
         }, userId);
@@ -863,8 +931,8 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       }
       case "get_lyrics": {
-        const trackUri = lastState?.trackUri || "";
-        const lyrics = await getLyricsForCurrentTrack();
+        const trackUri = getSession(userId).lastState?.trackUri || "";
+        const lyrics = await getLyricsForCurrentTrack(userId);
         send({
           type: "lyrics",
           trackUri,
@@ -883,19 +951,22 @@ spindle.onFrontendMessage(async (raw, userId) => {
     send({ type: "error", message: err?.message || "Unknown error" }, userId);
   }
 });
-var cachedLyrics = null;
-async function getLyricsForCurrentTrack() {
-  if (!isConnected())
+async function getLyricsForCurrentTrack(userId) {
+  const resolvedUserId = userId || activeUserId2 || undefined;
+  if (!resolvedUserId || !isConnected(resolvedUserId))
     return null;
+  const session = getSession(resolvedUserId);
   try {
-    const state = lastState || await getCurrentPlayback();
+    const state = session.lastState || await getCurrentPlayback(resolvedUserId);
     if (!state)
       return null;
-    if (cachedLyrics && cachedLyrics.trackUri === state.trackUri) {
-      return cachedLyrics.data;
+    if (session.cachedLyrics && session.cachedLyrics.trackUri === state.trackUri) {
+      return session.cachedLyrics.data;
     }
-    const data = await getLyrics(state.trackName, state.artistName, state.albumName, state.durationMs / 1000);
-    cachedLyrics = { trackUri: state.trackUri, data };
+    const data = await getLyrics(state.trackName, state.artistName, state.albumName, state.durationMs / 1000, resolvedUserId);
+    session.cachedLyrics = { trackUri: state.trackUri, data };
+    if (activeUserId2 === resolvedUserId)
+      syncActiveUserState(resolvedUserId);
     return data;
   } catch {
     return null;
@@ -903,8 +974,9 @@ async function getLyricsForCurrentTrack() {
 }
 async function applyAlbumTheme(colors, userId) {
   try {
+    const themeApi = spindle.theme;
     if (!colors) {
-      await spindle.theme.clear();
+      await themeApi.clear(userId);
       return;
     }
     await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
@@ -1496,7 +1568,8 @@ async function getPlaybackSeedState() {
   try {
     const current = await getCurrentPlayback();
     if (current) {
-      await cacheState(current);
+      if (activeUserId2)
+        await cacheState(activeUserId2, current);
       return current;
     }
     return null;
