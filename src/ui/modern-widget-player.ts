@@ -395,15 +395,20 @@ export function createModernWidgetPlayerUI(
     indexedLines.forEach((line, idx) => {
       const el = syncedLyricEls[idx];
       if (!el) return;
-      const distance = activeLineIndex < 0 ? line.index : Math.abs(line.index - activeLineIndex);
       el.className = "spotify-modern-widget-lyric-line";
       if (shouldReserveScaleGutter(line.text)) {
         el.classList.add("spotify-modern-widget-lyric-line-long");
       }
-      if (line.index === activeLineIndex) el.classList.add("active");
-      else if (distance === 1) el.classList.add("near");
-      else if (distance === 2) el.classList.add("mid");
-      else el.classList.add("far");
+      if (line.index === activeLineIndex) {
+        el.classList.add("active");
+      } else if (activeLineIndex >= 0) {
+        const distance = Math.abs(line.index - activeLineIndex);
+        if (distance === 1) el.classList.add("near");
+        else if (distance === 2) el.classList.add("mid");
+        else el.classList.add("far");
+      } else {
+        el.classList.add("far");
+      }
     });
 
     const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];

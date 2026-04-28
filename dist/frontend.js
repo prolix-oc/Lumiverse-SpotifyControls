@@ -505,6 +505,8 @@ var PANEL_CSS = `
   --spotify-modern-widget-collapsed-size: 48px;
   --spotify-modern-expanded-surface: var(--lcs-glass-bg, var(--lumiverse-bg-elevated));
   --spotify-modern-expanded-surface-alt: var(--lcs-glass-bg-hover, var(--lumiverse-bg));
+  --spotify-modern-widget-motion-duration: 420ms;
+  --spotify-modern-widget-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
   width: 100%;
   height: 100%;
   position: relative;
@@ -522,10 +524,10 @@ var PANEL_CSS = `
   backdrop-filter: none;
   color: #fff;
   transition:
-    width 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    height 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    width var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease),
+    height var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease),
+    border-radius var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease),
+    box-shadow var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease),
     border-color 320ms ease,
     background 320ms ease;
 }
@@ -554,19 +556,30 @@ var PANEL_CSS = `
 .spotify-modern-widget-expanded {
   position: absolute;
   inset: 0;
-  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), filter 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: center center;
+  transition:
+    opacity 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease);
 }
 
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-expanded,
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-compact {
   opacity: 0;
   pointer-events: none;
-  filter: blur(6px);
+}
+
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-expanded {
+  transform: scale(0.965);
+}
+
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-compact {
+  transform: scale(0.915);
 }
 
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-expanded,
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-compact {
   opacity: 1;
+  transform: scale(1);
 }
 
 .spotify-modern-widget-compact {
@@ -651,7 +664,9 @@ var PANEL_CSS = `
 .spotify-modern-widget-controls,
 .spotify-modern-widget-volume-row,
 .spotify-modern-widget-empty {
-  transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    opacity 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease);
 }
 
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-header,
@@ -662,7 +677,7 @@ var PANEL_CSS = `
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-volume-row,
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-empty {
   opacity: 0;
-  transform: translateY(12px);
+  transform: translateY(10px) scale(0.985);
 }
 
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-header,
@@ -673,7 +688,7 @@ var PANEL_CSS = `
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-volume-row,
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-empty {
   opacity: 1;
-  transform: none;
+  transform: translateY(0) scale(1);
 }
 
 .spotify-modern-widget-header {
@@ -875,6 +890,11 @@ var PANEL_CSS = `
   overflow-y: auto;
   overflow-x: hidden;
   position: relative;
+  box-sizing: border-box;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  scroll-padding-top: 36%;
+  scroll-padding-bottom: 24px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
@@ -886,7 +906,7 @@ var PANEL_CSS = `
   width: 100%;
   display: grid;
   gap: 4px;
-  padding: 4px 0 10px;
+  padding: 0 0 2px;
 }
 
 .spotify-modern-widget-lyrics-status {
@@ -3538,19 +3558,23 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       const el = syncedLyricEls[idx];
       if (!el)
         return;
-      const distance = activeLineIndex < 0 ? line.index : Math.abs(line.index - activeLineIndex);
       el.className = "spotify-modern-widget-lyric-line";
       if (shouldReserveScaleGutter(line.text)) {
         el.classList.add("spotify-modern-widget-lyric-line-long");
       }
-      if (line.index === activeLineIndex)
+      if (line.index === activeLineIndex) {
         el.classList.add("active");
-      else if (distance === 1)
-        el.classList.add("near");
-      else if (distance === 2)
-        el.classList.add("mid");
-      else
+      } else if (activeLineIndex >= 0) {
+        const distance = Math.abs(line.index - activeLineIndex);
+        if (distance === 1)
+          el.classList.add("near");
+        else if (distance === 2)
+          el.classList.add("mid");
+        else
+          el.classList.add("far");
+      } else {
         el.classList.add("far");
+      }
     });
     const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];
     if (!activeEl || !shouldAutoscroll)
