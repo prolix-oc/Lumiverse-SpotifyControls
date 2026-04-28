@@ -925,6 +925,17 @@ var PANEL_CSS = `
   width: 100%;
   box-sizing: border-box;
   padding: 6px 12px;
+  color: var(--lumiverse-text-dim);
+  text-align: center;
+  opacity: var(--spotify-lyrics-line-opacity);
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: color 160ms ease, opacity 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.spotify-lyrics-line-text {
+  display: block;
   font-size: 17px;
   font-weight: 600;
   line-height: 1.35;
@@ -932,16 +943,10 @@ var PANEL_CSS = `
   overflow-wrap: break-word;
   word-break: normal;
   text-wrap: pretty;
-  color: var(--lumiverse-text-dim);
-  text-align: center;
-  border-radius: 10px;
   letter-spacing: -0.015em;
-  opacity: var(--spotify-lyrics-line-opacity);
-  background: transparent;
   transform: translateY(0);
   transform-origin: center center;
-  cursor: pointer;
-  transition: color 160ms ease, opacity 160ms ease, background 160ms ease, box-shadow 160ms ease, text-shadow 160ms ease, filter 160ms ease;
+  transition: transform 160ms ease, text-shadow 160ms ease, filter 160ms ease;
 }
 
 .spotify-lyrics-line-enter {
@@ -959,6 +964,10 @@ var PANEL_CSS = `
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.02) 100%);
   opacity: 1;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045), 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+.spotify-lyrics-line-active .spotify-lyrics-line-text {
+  transform: scale(1.08);
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.1);
   filter: brightness(1.12);
 }
@@ -983,6 +992,9 @@ var PANEL_CSS = `
 .spotify-lyrics-line-blank {
   min-height: 22px;
   --spotify-lyrics-line-opacity: 0.18;
+}
+
+.spotify-lyrics-line-blank .spotify-lyrics-line-text {
   font-size: 15px;
   letter-spacing: 0.08em;
 }
@@ -2259,13 +2271,16 @@ function createLyricsUI(onSeek) {
     body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
     syncedLines = lines.map((line, index) => {
       const el = document.createElement("div");
+      const textEl = document.createElement("div");
       el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
       el.classList.add("spotify-lyrics-line-enter");
       el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(index * 28, 280)}ms`);
-      el.textContent = getLineDisplayText(line.text);
+      textEl.className = "spotify-lyrics-line-text";
+      textEl.textContent = getLineDisplayText(line.text);
+      el.appendChild(textEl);
       el.addEventListener("click", () => onSeek?.(line.timeMs));
       body.appendChild(el);
-      return { ...line, el };
+      return { ...line, el, textEl };
     });
     updateActiveLine();
     if (playback?.isPlaying)

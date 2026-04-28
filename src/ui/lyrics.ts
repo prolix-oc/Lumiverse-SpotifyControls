@@ -13,6 +13,7 @@ interface SyncedLyricLine {
   timeMs: number;
   text: string;
   el: HTMLDivElement;
+  textEl: HTMLDivElement;
 }
 
 interface LyricsPlayback {
@@ -222,13 +223,16 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
     syncedLines = lines.map((line, index) => {
       const el = document.createElement("div");
+      const textEl = document.createElement("div");
       el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
       el.classList.add("spotify-lyrics-line-enter");
       el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(index * 28, 280)}ms`);
-      el.textContent = getLineDisplayText(line.text);
+      textEl.className = "spotify-lyrics-line-text";
+      textEl.textContent = getLineDisplayText(line.text);
+      el.appendChild(textEl);
       el.addEventListener("click", () => onSeek?.(line.timeMs));
       body.appendChild(el);
-      return { ...line, el };
+      return { ...line, el, textEl };
     });
     updateActiveLine();
     if (playback?.isPlaying) startTicking();
