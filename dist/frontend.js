@@ -590,7 +590,7 @@ var PANEL_CSS = `
 .spotify-modern-widget-compact {
   border-radius: inherit;
   overflow: hidden;
-  padding: 5px;
+  padding: 6px;
   box-sizing: border-box;
 }
 
@@ -603,7 +603,7 @@ var PANEL_CSS = `
 
 .spotify-modern-widget-compact-fallback {
   position: absolute;
-  inset: 5px;
+  inset: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -619,35 +619,55 @@ var PANEL_CSS = `
 
 .spotify-modern-widget-compact-overlay {
   position: absolute;
-  inset: auto 5px 5px 5px;
-  padding: 8px 8px 7px;
-  display: grid;
-  gap: 6px;
-  border-radius: 0 0 max(14px, calc(var(--spotify-modern-widget-collapsed-size) * 0.24)) max(14px, calc(var(--spotify-modern-widget-collapsed-size) * 0.24));
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(7, 7, 9, 0.72) 100%);
+  inset: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  pointer-events: none;
 }
 
 .spotify-modern-widget-compact-status {
-  font-size: 10px;
+  align-self: flex-start;
+  max-width: calc(100% - 12px);
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(6, 6, 8, 0.38);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  backdrop-filter: blur(14px) saturate(1.15);
+  font-size: clamp(10px, calc(var(--spotify-modern-widget-collapsed-size) * 0.086), 11px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.82);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.32);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .spotify-modern-widget-compact-progress {
-  height: 3px;
+  align-self: stretch;
+  margin-top: auto;
+  padding: 2px;
+  height: 10px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(6, 6, 8, 0.32);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 12px 28px rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  backdrop-filter: blur(14px) saturate(1.1);
 }
 
 .spotify-modern-widget-compact-progress-fill {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #f8f9fc 0%, #cdd4e0 100%);
+  background: linear-gradient(90deg, rgba(252, 253, 255, 0.98) 0%, rgba(216, 224, 236, 0.92) 100%);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
 }
 
 .spotify-modern-widget-expanded {
@@ -4128,26 +4148,51 @@ function setup(ctx) {
   cleanups.push(removeStyle);
   let currentState = null;
   let connected = false;
-  const SIZE_PRESETS = { small: 36, medium: 48, large: 64 };
+  const DEFAULT_SIZE_PRESETS = { small: 36, medium: 48, large: 64 };
+  const MODERN_SIZE_PRESETS = { small: 112, medium: 128, large: 144 };
+  const DEFAULT_WIDGET_SIZE_MIN = 24;
+  const DEFAULT_WIDGET_SIZE_MAX = 128;
+  const MODERN_WIDGET_SIZE_MIN = 112;
+  const MODERN_WIDGET_SIZE_MAX = 192;
   const PREFS_KEY = "spotify-controls-widget-prefs";
+  function getSizePresets(style) {
+    return style === "modern" ? MODERN_SIZE_PRESETS : DEFAULT_SIZE_PRESETS;
+  }
+  function getSizeBounds(style) {
+    return style === "modern" ? { min: MODERN_WIDGET_SIZE_MIN, max: MODERN_WIDGET_SIZE_MAX } : { min: DEFAULT_WIDGET_SIZE_MIN, max: DEFAULT_WIDGET_SIZE_MAX };
+  }
+  function clampWidgetSize(size, style) {
+    const { min, max } = getSizeBounds(style);
+    return Math.max(min, Math.min(size, max));
+  }
+  function isSizeMode(value) {
+    return value === "small" || value === "medium" || value === "large" || value === "custom";
+  }
+  function inferSizeMode(size, style) {
+    const presets = getSizePresets(style);
+    if (size === presets.small)
+      return "small";
+    if (size === presets.large)
+      return "large";
+    if (size !== presets.medium)
+      return "custom";
+    return "medium";
+  }
   function normalizeWidgetPrefs(prefs) {
-    const size = typeof prefs?.size === "number" && prefs.size >= 24 && prefs.size <= 128 ? prefs.size : 48;
-    let sizeMode = prefs?.sizeMode;
-    if (sizeMode !== "small" && sizeMode !== "medium" && sizeMode !== "large" && sizeMode !== "custom") {
-      if (size === 36)
-        sizeMode = "small";
-      else if (size === 64)
-        sizeMode = "large";
-      else if (size !== 48)
-        sizeMode = "custom";
-      else
-        sizeMode = "medium";
+    const miniPlayerStyle = prefs?.miniPlayerStyle === "modern" ? "modern" : "default";
+    const presets = getSizePresets(miniPlayerStyle);
+    let sizeMode = isSizeMode(prefs?.sizeMode) ? prefs.sizeMode : undefined;
+    let size = typeof prefs?.size === "number" ? clampWidgetSize(prefs.size, miniPlayerStyle) : presets.medium;
+    if (sizeMode && sizeMode !== "custom") {
+      size = presets[sizeMode];
+    } else if (!sizeMode) {
+      sizeMode = inferSizeMode(size, miniPlayerStyle);
     }
     return {
       size,
       shape: prefs?.shape === "squircle" ? "squircle" : "circle",
       sizeMode,
-      miniPlayerStyle: prefs?.miniPlayerStyle === "modern" ? "modern" : "default",
+      miniPlayerStyle,
       x: typeof prefs?.x === "number" ? prefs.x : undefined,
       y: typeof prefs?.y === "number" ? prefs.y : undefined
     };
@@ -4288,6 +4333,24 @@ function setup(ctx) {
   const settingsUI = createSettingsUI(sendToBackend, getServerBaseUrl);
   settingsMount.appendChild(settingsUI.root);
   cleanups.push(() => settingsUI.destroy());
+  let widgetSizeLabelTitle = null;
+  let widgetSizeHint = null;
+  let widgetSizeInputRef = null;
+  function updateWidgetCustomizationUI() {
+    const { min, max } = getSizeBounds(currentMiniPlayerStyle);
+    if (widgetSizeLabelTitle) {
+      widgetSizeLabelTitle.textContent = currentMiniPlayerStyle === "modern" ? "Collapsed Modern Player Size (px)" : "Custom Widget Size (px)";
+    }
+    if (widgetSizeHint) {
+      widgetSizeHint.textContent = currentMiniPlayerStyle === "modern" ? "Controls the compact size of the modern player before it expands." : "Controls the floating widget size.";
+    }
+    if (widgetSizeInputRef) {
+      widgetSizeInputRef.min = String(min);
+      widgetSizeInputRef.max = String(max);
+      widgetSizeInputRef.placeholder = currentMiniPlayerStyle === "modern" ? "e.g. 128" : "e.g. 56";
+      widgetSizeInputRef.value = currentSizeMode === "custom" ? String(currentWidgetSize) : "";
+    }
+  }
   const settingsBody = settingsUI.root.querySelector(".spotify-settings-card-body");
   if (settingsBody) {
     const widgetDivider = document.createElement("div");
@@ -4295,17 +4358,17 @@ function setup(ctx) {
     settingsBody.appendChild(widgetDivider);
     const widgetSizeLabel = document.createElement("label");
     widgetSizeLabel.className = "spotify-settings-label";
-    widgetSizeLabel.textContent = "Custom Widget Size (px)";
+    widgetSizeLabelTitle = document.createElement("span");
+    widgetSizeLabel.appendChild(widgetSizeLabelTitle);
+    widgetSizeHint = document.createElement("div");
+    widgetSizeHint.style.cssText = "font-size:0.8em;opacity:0.6;margin-top:2px";
     const widgetSizeRow = document.createElement("div");
     widgetSizeRow.className = "spotify-settings-row";
     const widgetSizeInput = document.createElement("input");
     widgetSizeInput.className = "spotify-input";
     widgetSizeInput.type = "number";
-    widgetSizeInput.min = "24";
-    widgetSizeInput.max = "128";
     widgetSizeInput.style.width = "80px";
-    widgetSizeInput.value = currentSizeMode === "custom" ? String(currentWidgetSize) : "";
-    widgetSizeInput.placeholder = "e.g. 56";
+    widgetSizeInputRef = widgetSizeInput;
     const widgetSizeBtn = document.createElement("button");
     widgetSizeBtn.className = "spotify-btn spotify-btn-primary";
     widgetSizeBtn.textContent = "Apply";
@@ -4313,7 +4376,8 @@ function setup(ctx) {
     widgetSizeBtn.style.padding = "4px 12px";
     widgetSizeBtn.addEventListener("click", () => {
       const val = parseInt(widgetSizeInput.value, 10);
-      if (isNaN(val) || val < 24 || val > 128)
+      const { min, max } = getSizeBounds(currentMiniPlayerStyle);
+      if (isNaN(val) || val < min || val > max)
         return;
       currentSizeMode = "custom";
       recreateWidget(val);
@@ -4321,8 +4385,10 @@ function setup(ctx) {
     widgetSizeRow.appendChild(widgetSizeInput);
     widgetSizeRow.appendChild(widgetSizeBtn);
     widgetSizeLabel.appendChild(widgetSizeRow);
+    widgetSizeLabel.appendChild(widgetSizeHint);
     settingsBody.appendChild(widgetSizeLabel);
   }
+  updateWidgetCustomizationUI();
   const tab = ctx.ui.registerDrawerTab({
     id: "spotify",
     title: "Spotify Controls",
@@ -4515,26 +4581,25 @@ function setup(ctx) {
     miniPlayer.toggle();
   });
   async function showContextMenu(x, y) {
+    const items = [
+      { key: "small", label: "Small", active: currentSizeMode === "small" },
+      { key: "medium", label: "Medium", active: currentSizeMode === "medium" },
+      { key: "large", label: "Large", active: currentSizeMode === "large" },
+      { key: "custom", label: "Custom…", active: currentSizeMode === "custom" }
+    ];
+    if (currentMiniPlayerStyle !== "modern") {
+      items.push({ key: "div", label: "", type: "divider" }, { key: "circle", label: "Circle", active: currentArtShape === "circle" }, { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" });
+    }
+    items.push({ key: currentMiniPlayerStyle === "modern" ? "div" : "div2", label: "", type: "divider" }, { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" }, { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" });
     const { selectedKey } = await ctx.ui.showContextMenu({
       position: { x, y },
-      items: [
-        { key: "small", label: "Small", active: currentSizeMode === "small" },
-        { key: "medium", label: "Medium", active: currentSizeMode === "medium" },
-        { key: "large", label: "Large", active: currentSizeMode === "large" },
-        { key: "custom", label: "Custom…", active: currentSizeMode === "custom" },
-        { key: "div", label: "", type: "divider" },
-        { key: "circle", label: "Circle", active: currentArtShape === "circle" },
-        { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" },
-        { key: "div2", label: "", type: "divider" },
-        { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" },
-        { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" }
-      ]
+      items
     });
     if (!selectedKey)
       return;
     if (selectedKey === "small" || selectedKey === "medium" || selectedKey === "large") {
       currentSizeMode = selectedKey;
-      recreateWidget(SIZE_PRESETS[selectedKey]);
+      recreateWidget(getSizePresets(currentMiniPlayerStyle)[selectedKey]);
     } else if (selectedKey === "custom") {
       ctx.events.emit("open-settings", { view: "extensions" });
     } else if (selectedKey === "circle" || selectedKey === "squircle") {
@@ -4543,12 +4608,19 @@ function setup(ctx) {
       applyWidgetStyle();
     } else if (selectedKey === "mini-default" || selectedKey === "mini-modern") {
       currentMiniPlayerStyle = selectedKey === "mini-modern" ? "modern" : "default";
+      const presets = getSizePresets(currentMiniPlayerStyle);
+      if (currentSizeMode !== "custom") {
+        currentWidgetSize = presets[currentSizeMode];
+      } else {
+        currentWidgetSize = clampWidgetSize(currentWidgetSize, currentMiniPlayerStyle);
+      }
       if (currentMiniPlayerStyle !== "modern") {
         modernWidgetExpanded = false;
         modernWidget.setExpanded(false);
       }
       miniPlayer.hide();
       saveWidgetPrefs();
+      updateWidgetCustomizationUI();
       applyWidgetStyle();
       clampWidgetPosition();
     }
@@ -4605,11 +4677,12 @@ function setup(ctx) {
     modernWidget.setExpanded(false);
     const pos = widget.getPosition();
     widget.destroy();
-    currentWidgetSize = newSize;
+    currentWidgetSize = clampWidgetSize(newSize, currentMiniPlayerStyle);
+    updateWidgetCustomizationUI();
     saveWidgetPrefs();
     widget = ctx.ui.createFloatWidget({
-      width: newSize,
-      height: newSize,
+      width: currentWidgetSize,
+      height: currentWidgetSize,
       tooltip: "Spotify",
       chromeless: true
     });
@@ -4730,6 +4803,7 @@ function setup(ctx) {
         currentArtShape = p.shape;
         currentSizeMode = p.sizeMode;
         currentMiniPlayerStyle = p.miniPlayerStyle;
+        updateWidgetCustomizationUI();
         if (currentMiniPlayerStyle !== "modern") {
           modernWidgetExpanded = false;
           modernWidget.setExpanded(false);

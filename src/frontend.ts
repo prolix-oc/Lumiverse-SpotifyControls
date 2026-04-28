@@ -27,24 +27,60 @@ export function setup(ctx: SpindleFrontendContext) {
   // Widget preferences
   type ArtShape = "circle" | "squircle";
   type SizeMode = "small" | "medium" | "large" | "custom";
-  const SIZE_PRESETS: Record<Exclude<SizeMode, "custom">, number> = { small: 36, medium: 48, large: 64 };
+  const DEFAULT_SIZE_PRESETS: Record<Exclude<SizeMode, "custom">, number> = { small: 36, medium: 48, large: 64 };
+  const MODERN_SIZE_PRESETS: Record<Exclude<SizeMode, "custom">, number> = { small: 112, medium: 128, large: 144 };
+  const DEFAULT_WIDGET_SIZE_MIN = 24;
+  const DEFAULT_WIDGET_SIZE_MAX = 128;
+  const MODERN_WIDGET_SIZE_MIN = 112;
+  const MODERN_WIDGET_SIZE_MAX = 192;
   const PREFS_KEY = "spotify-controls-widget-prefs";
 
+  function getSizePresets(style: MiniPlayerStyle): Record<Exclude<SizeMode, "custom">, number> {
+    return style === "modern" ? MODERN_SIZE_PRESETS : DEFAULT_SIZE_PRESETS;
+  }
+
+  function getSizeBounds(style: MiniPlayerStyle) {
+    return style === "modern"
+      ? { min: MODERN_WIDGET_SIZE_MIN, max: MODERN_WIDGET_SIZE_MAX }
+      : { min: DEFAULT_WIDGET_SIZE_MIN, max: DEFAULT_WIDGET_SIZE_MAX };
+  }
+
+  function clampWidgetSize(size: number, style: MiniPlayerStyle): number {
+    const { min, max } = getSizeBounds(style);
+    return Math.max(min, Math.min(size, max));
+  }
+
+  function isSizeMode(value: unknown): value is SizeMode {
+    return value === "small" || value === "medium" || value === "large" || value === "custom";
+  }
+
+  function inferSizeMode(size: number, style: MiniPlayerStyle): SizeMode {
+    const presets = getSizePresets(style);
+    if (size === presets.small) return "small";
+    if (size === presets.large) return "large";
+    if (size !== presets.medium) return "custom";
+    return "medium";
+  }
+
   function normalizeWidgetPrefs(prefs?: Partial<WidgetPrefs> | null): WidgetPrefs {
-    const size = typeof prefs?.size === "number" && prefs.size >= 24 && prefs.size <= 128 ? prefs.size : 48;
-    let sizeMode = prefs?.sizeMode;
-    if (sizeMode !== "small" && sizeMode !== "medium" && sizeMode !== "large" && sizeMode !== "custom") {
-      if (size === 36) sizeMode = "small";
-      else if (size === 64) sizeMode = "large";
-      else if (size !== 48) sizeMode = "custom";
-      else sizeMode = "medium";
+    const miniPlayerStyle = prefs?.miniPlayerStyle === "modern" ? "modern" : "default";
+    const presets = getSizePresets(miniPlayerStyle);
+    let sizeMode = isSizeMode(prefs?.sizeMode) ? prefs.sizeMode : undefined;
+    let size = typeof prefs?.size === "number"
+      ? clampWidgetSize(prefs.size, miniPlayerStyle)
+      : presets.medium;
+
+    if (sizeMode && sizeMode !== "custom") {
+      size = presets[sizeMode];
+    } else if (!sizeMode) {
+      sizeMode = inferSizeMode(size, miniPlayerStyle);
     }
 
     return {
       size,
       shape: prefs?.shape === "squircle" ? "squircle" : "circle",
       sizeMode,
-      miniPlayerStyle: prefs?.miniPlayerStyle === "modern" ? "modern" : "default",
+      miniPlayerStyle,
       x: typeof prefs?.x === "number" ? prefs.x : undefined,
       y: typeof prefs?.y === "number" ? prefs.y : undefined,
     };
@@ -201,6 +237,30 @@ export function setup(ctx: SpindleFrontendContext) {
   settingsMount.appendChild(settingsUI.root);
   cleanups.push(() => settingsUI.destroy());
 
+  let widgetSizeLabelTitle: HTMLSpanElement | null = null;
+  let widgetSizeHint: HTMLDivElement | null = null;
+  let widgetSizeInputRef: HTMLInputElement | null = null;
+
+  function updateWidgetCustomizationUI() {
+    const { min, max } = getSizeBounds(currentMiniPlayerStyle);
+    if (widgetSizeLabelTitle) {
+      widgetSizeLabelTitle.textContent = currentMiniPlayerStyle === "modern"
+        ? "Collapsed Modern Player Size (px)"
+        : "Custom Widget Size (px)";
+    }
+    if (widgetSizeHint) {
+      widgetSizeHint.textContent = currentMiniPlayerStyle === "modern"
+        ? "Controls the compact size of the modern player before it expands."
+        : "Controls the floating widget size.";
+    }
+    if (widgetSizeInputRef) {
+      widgetSizeInputRef.min = String(min);
+      widgetSizeInputRef.max = String(max);
+      widgetSizeInputRef.placeholder = currentMiniPlayerStyle === "modern" ? "e.g. 128" : "e.g. 56";
+      widgetSizeInputRef.value = currentSizeMode === "custom" ? String(currentWidgetSize) : "";
+    }
+  }
+
   // Custom widget size field in settings
   const settingsBody = settingsUI.root.querySelector(".spotify-settings-card-body");
   if (settingsBody) {
@@ -210,7 +270,12 @@ export function setup(ctx: SpindleFrontendContext) {
 
     const widgetSizeLabel = document.createElement("label");
     widgetSizeLabel.className = "spotify-settings-label";
-    widgetSizeLabel.textContent = "Custom Widget Size (px)";
+
+    widgetSizeLabelTitle = document.createElement("span");
+    widgetSizeLabel.appendChild(widgetSizeLabelTitle);
+
+    widgetSizeHint = document.createElement("div");
+    widgetSizeHint.style.cssText = "font-size:0.8em;opacity:0.6;margin-top:2px";
 
     const widgetSizeRow = document.createElement("div");
     widgetSizeRow.className = "spotify-settings-row";
@@ -218,11 +283,8 @@ export function setup(ctx: SpindleFrontendContext) {
     const widgetSizeInput = document.createElement("input");
     widgetSizeInput.className = "spotify-input";
     widgetSizeInput.type = "number";
-    widgetSizeInput.min = "24";
-    widgetSizeInput.max = "128";
     widgetSizeInput.style.width = "80px";
-    widgetSizeInput.value = currentSizeMode === "custom" ? String(currentWidgetSize) : "";
-    widgetSizeInput.placeholder = "e.g. 56";
+    widgetSizeInputRef = widgetSizeInput;
 
     const widgetSizeBtn = document.createElement("button");
     widgetSizeBtn.className = "spotify-btn spotify-btn-primary";
@@ -231,7 +293,8 @@ export function setup(ctx: SpindleFrontendContext) {
     widgetSizeBtn.style.padding = "4px 12px";
     widgetSizeBtn.addEventListener("click", () => {
       const val = parseInt(widgetSizeInput.value, 10);
-      if (isNaN(val) || val < 24 || val > 128) return;
+      const { min, max } = getSizeBounds(currentMiniPlayerStyle);
+      if (isNaN(val) || val < min || val > max) return;
       currentSizeMode = "custom";
       recreateWidget(val);
     });
@@ -239,8 +302,10 @@ export function setup(ctx: SpindleFrontendContext) {
     widgetSizeRow.appendChild(widgetSizeInput);
     widgetSizeRow.appendChild(widgetSizeBtn);
     widgetSizeLabel.appendChild(widgetSizeRow);
+    widgetSizeLabel.appendChild(widgetSizeHint);
     settingsBody.appendChild(widgetSizeLabel);
   }
+  updateWidgetCustomizationUI();
 
   // ─── Drawer Tab ──────────────────────────────────────────────────────
 
@@ -485,27 +550,37 @@ export function setup(ctx: SpindleFrontendContext) {
   // ─── Context Menu (via Spindle API — themed, works on mobile via long-press) ─
 
   async function showContextMenu(x: number, y: number) {
-    const { selectedKey } = await ctx.ui.showContextMenu({
-      position: { x, y },
-      items: [
-        { key: "small", label: "Small", active: currentSizeMode === "small" },
-        { key: "medium", label: "Medium", active: currentSizeMode === "medium" },
-        { key: "large", label: "Large", active: currentSizeMode === "large" },
-        { key: "custom", label: "Custom…", active: currentSizeMode === "custom" },
+    const items: Array<{ key: string; label: string; active?: boolean; type?: "divider" }> = [
+      { key: "small", label: "Small", active: currentSizeMode === "small" },
+      { key: "medium", label: "Medium", active: currentSizeMode === "medium" },
+      { key: "large", label: "Large", active: currentSizeMode === "large" },
+      { key: "custom", label: "Custom…", active: currentSizeMode === "custom" },
+    ];
+
+    if (currentMiniPlayerStyle !== "modern") {
+      items.push(
         { key: "div", label: "", type: "divider" },
         { key: "circle", label: "Circle", active: currentArtShape === "circle" },
-        { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" },
-        { key: "div2", label: "", type: "divider" },
-        { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" },
-        { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" },
-      ],
+        { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" }
+      );
+    }
+
+    items.push(
+      { key: currentMiniPlayerStyle === "modern" ? "div" : "div2", label: "", type: "divider" },
+      { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" },
+      { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" }
+    );
+
+    const { selectedKey } = await ctx.ui.showContextMenu({
+      position: { x, y },
+      items,
     });
 
     if (!selectedKey) return;
 
     if (selectedKey === "small" || selectedKey === "medium" || selectedKey === "large") {
       currentSizeMode = selectedKey;
-      recreateWidget(SIZE_PRESETS[selectedKey]);
+      recreateWidget(getSizePresets(currentMiniPlayerStyle)[selectedKey]);
     } else if (selectedKey === "custom") {
       ctx.events.emit("open-settings", { view: "extensions" });
     } else if (selectedKey === "circle" || selectedKey === "squircle") {
@@ -514,12 +589,19 @@ export function setup(ctx: SpindleFrontendContext) {
       applyWidgetStyle();
     } else if (selectedKey === "mini-default" || selectedKey === "mini-modern") {
       currentMiniPlayerStyle = selectedKey === "mini-modern" ? "modern" : "default";
+      const presets = getSizePresets(currentMiniPlayerStyle);
+      if (currentSizeMode !== "custom") {
+        currentWidgetSize = presets[currentSizeMode];
+      } else {
+        currentWidgetSize = clampWidgetSize(currentWidgetSize, currentMiniPlayerStyle);
+      }
       if (currentMiniPlayerStyle !== "modern") {
         modernWidgetExpanded = false;
         modernWidget.setExpanded(false);
       }
       miniPlayer.hide();
       saveWidgetPrefs();
+      updateWidgetCustomizationUI();
       applyWidgetStyle();
       clampWidgetPosition();
     }
@@ -581,12 +663,13 @@ export function setup(ctx: SpindleFrontendContext) {
     const pos = widget.getPosition();
     widget.destroy();
 
-    currentWidgetSize = newSize;
+    currentWidgetSize = clampWidgetSize(newSize, currentMiniPlayerStyle);
+    updateWidgetCustomizationUI();
     saveWidgetPrefs();
 
     widget = ctx.ui.createFloatWidget({
-      width: newSize,
-      height: newSize,
+      width: currentWidgetSize,
+      height: currentWidgetSize,
       tooltip: "Spotify",
       chromeless: true,
     });
@@ -725,6 +808,7 @@ export function setup(ctx: SpindleFrontendContext) {
         currentArtShape = p.shape;
         currentSizeMode = p.sizeMode;
         currentMiniPlayerStyle = p.miniPlayerStyle;
+        updateWidgetCustomizationUI();
         if (currentMiniPlayerStyle !== "modern") {
           modernWidgetExpanded = false;
           modernWidget.setExpanded(false);

@@ -1,6 +1,6 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
-import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors } from "./types";
+import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle } from "./types";
 import * as spotify from "./spotify-api";
 
 // ─── State ───────────────────────────────────────────────────────────────
@@ -135,21 +135,59 @@ async function handleUserChange(userId: string): Promise<void> {
 
 import type { PlaybackState } from "./types";
 
+const DEFAULT_SIZE_PRESETS = { small: 36, medium: 48, large: 64 } as const;
+const MODERN_SIZE_PRESETS = { small: 112, medium: 128, large: 144 } as const;
+const DEFAULT_WIDGET_SIZE_MIN = 24;
+const DEFAULT_WIDGET_SIZE_MAX = 128;
+const MODERN_WIDGET_SIZE_MIN = 112;
+const MODERN_WIDGET_SIZE_MAX = 192;
+
+function getSizePresets(style: MiniPlayerStyle) {
+  return style === "modern" ? MODERN_SIZE_PRESETS : DEFAULT_SIZE_PRESETS;
+}
+
+function getSizeBounds(style: MiniPlayerStyle) {
+  return style === "modern"
+    ? { min: MODERN_WIDGET_SIZE_MIN, max: MODERN_WIDGET_SIZE_MAX }
+    : { min: DEFAULT_WIDGET_SIZE_MIN, max: DEFAULT_WIDGET_SIZE_MAX };
+}
+
+function clampWidgetSize(size: number, style: MiniPlayerStyle): number {
+  const { min, max } = getSizeBounds(style);
+  return Math.max(min, Math.min(size, max));
+}
+
+function isSizeMode(value: unknown): value is WidgetPrefs["sizeMode"] {
+  return value === "small" || value === "medium" || value === "large" || value === "custom";
+}
+
+function inferSizeMode(size: number, style: MiniPlayerStyle): WidgetPrefs["sizeMode"] {
+  const presets = getSizePresets(style);
+  if (size === presets.small) return "small";
+  if (size === presets.large) return "large";
+  if (size !== presets.medium) return "custom";
+  return "medium";
+}
+
 function normalizeWidgetPrefs(prefs?: Partial<WidgetPrefs> | null): WidgetPrefs {
-  const size = typeof prefs?.size === "number" && prefs.size >= 24 && prefs.size <= 128 ? prefs.size : 48;
-  let sizeMode = prefs?.sizeMode;
-  if (sizeMode !== "small" && sizeMode !== "medium" && sizeMode !== "large" && sizeMode !== "custom") {
-    if (size === 36) sizeMode = "small";
-    else if (size === 64) sizeMode = "large";
-    else if (size !== 48) sizeMode = "custom";
-    else sizeMode = "medium";
+  const miniPlayerStyle = prefs?.miniPlayerStyle === "modern" ? "modern" : "default";
+  const presets = getSizePresets(miniPlayerStyle);
+  let sizeMode = isSizeMode(prefs?.sizeMode) ? prefs.sizeMode : undefined;
+  let size = typeof prefs?.size === "number"
+    ? clampWidgetSize(prefs.size, miniPlayerStyle)
+    : presets.medium;
+
+  if (sizeMode && sizeMode !== "custom") {
+    size = presets[sizeMode];
+  } else if (!sizeMode) {
+    sizeMode = inferSizeMode(size, miniPlayerStyle);
   }
 
   return {
     size,
     shape: prefs?.shape === "squircle" ? "squircle" : "circle",
     sizeMode,
-    miniPlayerStyle: prefs?.miniPlayerStyle === "modern" ? "modern" : "default",
+    miniPlayerStyle,
     x: typeof prefs?.x === "number" ? prefs.x : undefined,
     y: typeof prefs?.y === "number" ? prefs.y : undefined,
   };
