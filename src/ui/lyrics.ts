@@ -24,6 +24,8 @@ interface LyricsPlayback {
 }
 
 const USER_SCROLL_SUPPRESS_MS = 2500;
+const LOADING_STATUS_DELAY_MS = 180;
+const EMPTY_SYNCED_LINE_SYMBOL = "♪";
 
 function parseTimestamp(raw: string): number | null {
   const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
@@ -74,6 +76,10 @@ function getLineClassName(index: number, activeLineIndex: number, hasText: boole
   return classes.join(" ");
 }
 
+function getLineDisplayText(text: string): string {
+  return text || EMPTY_SYNCED_LINE_SYMBOL;
+}
+
 export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
@@ -93,8 +99,17 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   let activeLineIndex = -1;
   let tickTimer: ReturnType<typeof setInterval> | null = null;
   let autoScrollTimer: ReturnType<typeof setTimeout> | null = null;
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null;
   let isAutoScrolling = false;
   let lastUserScrollAt = 0;
+
+  function stopLoadingState() {
+    if (loadingTimer) {
+      clearTimeout(loadingTimer);
+      loadingTimer = null;
+    }
+    body.classList.remove("spotify-lyrics-loading");
+  }
 
   function stopAutoScrollTracking() {
     if (autoScrollTimer) {
@@ -144,7 +159,11 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     if (activeLine && Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS) {
       isAutoScrolling = true;
       if (autoScrollTimer) clearTimeout(autoScrollTimer);
-      activeLine.el.scrollIntoView({ block: "center", behavior: "smooth" });
+      requestAnimationFrame(() => {
+        const targetScrollTop = activeLine.el.offsetTop + activeLine.el.offsetHeight / 2 - body.clientHeight / 2;
+        const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+        body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior: "smooth" });
+      });
       autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
     }
   }
@@ -167,6 +186,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function clear() {
     stopTicking();
     stopAutoScrollTracking();
+    stopLoadingState();
     body.innerHTML = "";
     body.className = "spotify-lyrics-body";
     currentTrackUri = null;
@@ -176,26 +196,36 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   }
 
   function setLoading(loading: boolean) {
+    stopLoadingState();
+    if (!loading) return;
+
     if (loading) {
       stopTicking();
       stopAutoScrollTracking();
       body.innerHTML = "";
-      body.className = "spotify-lyrics-body";
+      body.className = "spotify-lyrics-body spotify-lyrics-loading";
       syncedLines = [];
       activeLineIndex = -1;
-      const el = document.createElement("div");
-      el.className = "spotify-lyrics-status";
-      el.textContent = "Loading lyrics…";
-      body.appendChild(el);
+      loadingTimer = setTimeout(() => {
+        loadingTimer = null;
+        if (!body.classList.contains("spotify-lyrics-loading")) return;
+        const el = document.createElement("div");
+        el.className = "spotify-lyrics-status spotify-lyrics-status-loading";
+        el.textContent = "Loading lyrics...";
+        body.appendChild(el);
+      }, LOADING_STATUS_DELAY_MS);
     }
   }
 
   function renderSyncedLyrics(lines: Array<{ timeMs: number; text: string }>) {
+    stopLoadingState();
     body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
     syncedLines = lines.map((line, index) => {
       const el = document.createElement("div");
       el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
-      el.textContent = line.text || " ";
+      el.classList.add("spotify-lyrics-line-enter");
+      el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(index * 28, 280)}ms`);
+      el.textContent = getLineDisplayText(line.text);
       el.addEventListener("click", () => onSeek?.(line.timeMs));
       body.appendChild(el);
       return { ...line, el };
@@ -205,9 +235,10 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   }
 
   function renderPlainLyrics(lyrics: string) {
+    stopLoadingState();
     body.className = "spotify-lyrics-body spotify-lyrics-has-content";
     const pre = document.createElement("div");
-    pre.className = "spotify-lyrics-text";
+    pre.className = "spotify-lyrics-text spotify-lyrics-text-enter";
     pre.textContent = lyrics;
     body.appendChild(pre);
   }
@@ -215,6 +246,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function update(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean) {
     stopTicking();
     stopAutoScrollTracking();
+    stopLoadingState();
     currentTrackUri = trackUri;
     body.innerHTML = "";
     syncedLines = [];
@@ -276,6 +308,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     destroy() {
       stopTicking();
       stopAutoScrollTracking();
+      stopLoadingState();
       root.remove();
     },
   };

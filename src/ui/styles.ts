@@ -898,6 +898,11 @@ export const PANEL_CSS = `
   font-style: italic;
 }
 
+.spotify-lyrics-status-loading {
+  letter-spacing: 0.02em;
+  animation: spotify-lyrics-loading-pulse 1.15s ease-in-out infinite;
+}
+
 .spotify-lyrics-text {
   white-space: pre-wrap;
   font-size: 16px;
@@ -913,12 +918,14 @@ export const PANEL_CSS = `
 }
 
 .spotify-lyrics-line {
+  --spotify-lyrics-line-opacity: 1;
+  --spotify-lyrics-line-scale: 0.965;
   display: block;
   width: 100%;
   box-sizing: border-box;
   padding: 6px 12px;
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 16.5px;
+  font-weight: 580;
   line-height: 1.35;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -926,10 +933,16 @@ export const PANEL_CSS = `
   text-align: center;
   border-radius: 10px;
   letter-spacing: -0.015em;
-  transform: scale(0.97);
+  opacity: var(--spotify-lyrics-line-opacity);
+  transform: translateY(0) scale(var(--spotify-lyrics-line-scale));
   transform-origin: center center;
   cursor: pointer;
   transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease, font-size 160ms ease, text-shadow 160ms ease;
+}
+
+.spotify-lyrics-line-enter {
+  animation: spotify-lyrics-line-in 420ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
+  animation-delay: var(--spotify-lyrics-enter-delay, 0ms);
 }
 
 .spotify-lyrics-line:hover {
@@ -937,36 +950,92 @@ export const PANEL_CSS = `
 }
 
 .spotify-lyrics-line-active {
+  --spotify-lyrics-line-opacity: 1;
+  --spotify-lyrics-line-scale: 1.065;
   color: var(--lumiverse-text);
   background: transparent;
-  font-size: 18.5px;
-  font-weight: 700;
+  font-size: 21px;
+  font-weight: 760;
   opacity: 1;
-  transform: scale(1.025);
+  letter-spacing: -0.025em;
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
 }
 
 .spotify-lyrics-line-near {
+  --spotify-lyrics-line-scale: 1;
   color: var(--lumiverse-text-muted);
-  transform: scale(0.99);
 }
 
 .spotify-lyrics-line-past {
-  opacity: 0.3;
+  --spotify-lyrics-line-opacity: 0.3;
 }
 
 .spotify-lyrics-line-future {
-  opacity: 0.42;
+  --spotify-lyrics-line-opacity: 0.42;
 }
 
 .spotify-lyrics-line-past.spotify-lyrics-line-near,
 .spotify-lyrics-line-future.spotify-lyrics-line-near {
-  opacity: 0.72;
+  --spotify-lyrics-line-opacity: 0.72;
 }
 
 .spotify-lyrics-line-blank {
   min-height: 22px;
-  opacity: 0.18;
+  --spotify-lyrics-line-opacity: 0.18;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+
+.spotify-lyrics-text-enter {
+  animation: spotify-lyrics-text-in 340ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
+}
+
+@keyframes spotify-lyrics-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.38;
+  }
+
+  50% {
+    opacity: 0.8;
+  }
+}
+
+@keyframes spotify-lyrics-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.95);
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: var(--spotify-lyrics-line-opacity);
+    transform: translateY(0) scale(var(--spotify-lyrics-line-scale));
+    filter: blur(0);
+  }
+}
+
+@keyframes spotify-lyrics-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotify-lyrics-line,
+  .spotify-lyrics-text,
+  .spotify-lyrics-status-loading {
+    animation: none !important;
+    transition: none;
+  }
 }
 
 `;
