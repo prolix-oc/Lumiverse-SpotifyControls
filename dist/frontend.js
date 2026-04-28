@@ -920,13 +920,13 @@ var PANEL_CSS = `
 
 .spotify-lyrics-line {
   --spotify-lyrics-line-opacity: 1;
-  --spotify-lyrics-line-scale: 0.965;
+  --spotify-lyrics-line-scale: 0.98;
   display: block;
   width: 100%;
   box-sizing: border-box;
   padding: 6px 12px;
-  font-size: 16.5px;
-  font-weight: 580;
+  font-size: 17px;
+  font-weight: 600;
   line-height: 1.35;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -952,18 +952,17 @@ var PANEL_CSS = `
 
 .spotify-lyrics-line-active {
   --spotify-lyrics-line-opacity: 1;
-  --spotify-lyrics-line-scale: 1.065;
+  --spotify-lyrics-line-scale: 1.08;
   color: var(--lumiverse-text);
   background: transparent;
-  font-size: 21px;
-  font-weight: 760;
+  font-weight: 700;
   opacity: 1;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
 }
 
 .spotify-lyrics-line-near {
-  --spotify-lyrics-line-scale: 1;
+  --spotify-lyrics-line-scale: 1.01;
   color: var(--lumiverse-text-muted);
 }
 
