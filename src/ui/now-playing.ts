@@ -1,5 +1,5 @@
 import type { PlaybackState } from "../types";
-import { createCrossfadeArt } from "./crossfade-art";
+import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
 
 export interface NowPlayingUI {
   root: HTMLElement;
@@ -150,7 +150,7 @@ export function createNowPlayingUI(
     }
     currentDuration = state.durationMs;
 
-    art.setUrl(state.albumArtUrl);
+    art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
 
     lastProgressMs = state.progressMs;
     lastUpdateTime = Date.now();

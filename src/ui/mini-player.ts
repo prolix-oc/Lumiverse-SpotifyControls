@@ -1,5 +1,5 @@
 import type { PlaybackState, DeviceInfo } from "../types";
-import { createCrossfadeArt } from "./crossfade-art";
+import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
 
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
@@ -432,7 +432,7 @@ export function createMiniPlayerUI(
     artistName.textContent = state.artistName;
     currentDuration = state.durationMs;
 
-    art.setUrl(state.albumArtUrl);
+    art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
 
     isPlaying = state.isPlaying;
     lastIsPlaying = state.isPlaying;

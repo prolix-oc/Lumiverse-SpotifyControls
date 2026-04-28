@@ -881,11 +881,14 @@ var PANEL_CSS = `
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
   position: relative;
-  padding-bottom: 112px;
-  scroll-padding-bottom: 112px;
-  box-sizing: border-box;
-  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 48px), transparent 100%);
-  mask-image: linear-gradient(to bottom, black calc(100% - 48px), transparent 100%);
+   padding-top: 28px;
+   padding-bottom: 112px;
+   padding-inline: 6px;
+   scroll-padding-top: 34%;
+   scroll-padding-bottom: 112px;
+   box-sizing: border-box;
+   -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 40px, black calc(100% - 56px), transparent 100%);
+   mask-image: linear-gradient(to bottom, transparent 0, black 40px, black calc(100% - 56px), transparent 100%);
 }
 
 .spotify-lyrics-status {
@@ -898,15 +901,15 @@ var PANEL_CSS = `
 
 .spotify-lyrics-text {
   white-space: pre-wrap;
-  font-size: 15px;
-  line-height: 1.8;
-  color: var(--lumiverse-text-muted);
-  text-align: center;
-  padding: 8px 0;
+  font-size: 16px;
+  line-height: 1.65;
+   color: var(--lumiverse-text-muted);
+   text-align: center;
+   padding: 8px 12px 24px;
 }
 
 .spotify-lyrics-synced {
-  gap: 10px;
+  gap: 2px;
   scroll-behavior: smooth;
 }
 
@@ -914,18 +917,20 @@ var PANEL_CSS = `
   display: block;
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 14px;
-  font-size: 15px;
-  line-height: 1.65;
+  padding: 6px 12px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--lumiverse-text-dim);
   text-align: center;
-  border-radius: 12px;
-  transform: scale(0.96);
+  border-radius: 10px;
+  letter-spacing: -0.015em;
+  transform: scale(0.97);
   transform-origin: center center;
   cursor: pointer;
-  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease, font-size 160ms ease;
+  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease, text-shadow 160ms ease;
 }
 
 .spotify-lyrics-line:hover {
@@ -934,23 +939,34 @@ var PANEL_CSS = `
 
 .spotify-lyrics-line-active {
   color: var(--lumiverse-text);
-  background: var(--lumiverse-fill-subtle);
-  font-size: 16px;
-  font-weight: 650;
+  background: transparent;
+  font-weight: 700;
   opacity: 1;
-  transform: scale(1);
+  transform: scale(1.025);
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
+}
+
+.spotify-lyrics-line-near {
+  color: var(--lumiverse-text-muted);
+  transform: scale(0.99);
 }
 
 .spotify-lyrics-line-past {
-  opacity: 0.45;
+  opacity: 0.3;
 }
 
 .spotify-lyrics-line-future {
-  opacity: 0.7;
+  opacity: 0.42;
+}
+
+.spotify-lyrics-line-past.spotify-lyrics-line-near,
+.spotify-lyrics-line-future.spotify-lyrics-line-near {
+  opacity: 0.72;
 }
 
 .spotify-lyrics-line-blank {
-  opacity: 0.25;
+  min-height: 22px;
+  opacity: 0.18;
 }
 
 `;
@@ -1162,6 +1178,20 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
 }
 
 // src/ui/crossfade-art.ts
+function getTrackScopedArtUrl(url, trackUri) {
+  if (!url)
+    return null;
+  if (!trackUri)
+    return url;
+  try {
+    const scopedUrl = new URL(url);
+    scopedUrl.searchParams.set("track", trackUri);
+    return scopedUrl.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}track=${encodeURIComponent(trackUri)}`;
+  }
+}
 function createCrossfadeArt(className) {
   const el = document.createElement("div");
   el.className = `${className} spotify-crossfade-art`;
@@ -1346,7 +1376,7 @@ function createNowPlayingUI(onSeek) {
       deviceRow.style.display = "none";
     }
     currentDuration = state.durationMs;
-    art.setUrl(state.albumArtUrl);
+    art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
     lastProgressMs = state.progressMs;
     lastUpdateTime = Date.now();
     lastIsPlaying = state.isPlaying;
@@ -1900,7 +1930,7 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     trackName.textContent = state.trackName;
     artistName.textContent = state.artistName;
     currentDuration = state.durationMs;
-    art.setUrl(state.albumArtUrl);
+    art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
     isPlaying = state.isPlaying;
     lastIsPlaying = state.isPlaying;
     lastProgressMs = state.progressMs;
@@ -2008,6 +2038,20 @@ function parseSyncedLyrics(value) {
   }
   return grouped;
 }
+function getLineClassName(index, activeLineIndex, hasText) {
+  const classes = ["spotify-lyrics-line"];
+  if (!hasText)
+    classes.push("spotify-lyrics-line-blank");
+  if (index === activeLineIndex)
+    classes.push("spotify-lyrics-line-active");
+  else if (index < activeLineIndex)
+    classes.push("spotify-lyrics-line-past");
+  else
+    classes.push("spotify-lyrics-line-future");
+  if (activeLineIndex >= 0 && Math.abs(index - activeLineIndex) === 1)
+    classes.push("spotify-lyrics-line-near");
+  return classes.join(" ");
+}
 function createLyricsUI(onSeek) {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
@@ -2065,16 +2109,7 @@ function createLyricsUI(onSeek) {
   function updateLineClasses(nextActiveLineIndex) {
     activeLineIndex = nextActiveLineIndex;
     syncedLines.forEach((line, index) => {
-      const classes = ["spotify-lyrics-line"];
-      if (!line.text)
-        classes.push("spotify-lyrics-line-blank");
-      if (index === activeLineIndex)
-        classes.push("spotify-lyrics-line-active");
-      else if (index < activeLineIndex)
-        classes.push("spotify-lyrics-line-past");
-      else
-        classes.push("spotify-lyrics-line-future");
-      line.el.className = classes.join(" ");
+      line.el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
     });
     const activeLine = syncedLines[activeLineIndex];
     if (activeLine && Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS) {
@@ -2125,9 +2160,9 @@ function createLyricsUI(onSeek) {
   }
   function renderSyncedLyrics(lines) {
     body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
-    syncedLines = lines.map((line) => {
+    syncedLines = lines.map((line, index) => {
       const el = document.createElement("div");
-      el.className = `spotify-lyrics-line${line.text ? " spotify-lyrics-line-future" : " spotify-lyrics-line-blank spotify-lyrics-line-future"}`;
+      el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
       el.textContent = line.text || " ";
       el.addEventListener("click", () => onSeek?.(line.timeMs));
       body.appendChild(el);
@@ -2626,10 +2661,11 @@ function setup(ctx) {
     showContextMenu(e.clientX, e.clientY);
   });
   function updateWidget(state) {
-    if (state?.albumArtUrl) {
+    const artUrl = getTrackScopedArtUrl(state?.albumArtUrl ?? null, state?.trackUri);
+    if (artUrl) {
       widgetIcon.style.display = "none";
       widgetArt.el.style.display = "";
-      widgetArt.setUrl(state.albumArtUrl);
+      widgetArt.setUrl(artUrl);
     } else {
       widgetIcon.style.display = "";
       widgetArt.el.style.display = "none";
@@ -2675,7 +2711,7 @@ function setup(ctx) {
         lyricsUI.updatePlayback(currentState);
         updateWidget(currentState);
         scheduleTrackEndRefresh(currentState);
-        const artUrl = currentState?.albumArtUrl ?? null;
+        const artUrl = getTrackScopedArtUrl(currentState?.albumArtUrl ?? null, currentState?.trackUri);
         if (artUrl !== lastThemeArtUrl) {
           lastThemeArtUrl = artUrl;
           if (artUrl) {

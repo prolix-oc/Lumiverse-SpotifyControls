@@ -64,6 +64,16 @@ function parseSyncedLyrics(value: string | null): Array<{ timeMs: number; text: 
   return grouped;
 }
 
+function getLineClassName(index: number, activeLineIndex: number, hasText: boolean): string {
+  const classes = ["spotify-lyrics-line"];
+  if (!hasText) classes.push("spotify-lyrics-line-blank");
+  if (index === activeLineIndex) classes.push("spotify-lyrics-line-active");
+  else if (index < activeLineIndex) classes.push("spotify-lyrics-line-past");
+  else classes.push("spotify-lyrics-line-future");
+  if (activeLineIndex >= 0 && Math.abs(index - activeLineIndex) === 1) classes.push("spotify-lyrics-line-near");
+  return classes.join(" ");
+}
+
 export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
@@ -127,12 +137,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function updateLineClasses(nextActiveLineIndex: number) {
     activeLineIndex = nextActiveLineIndex;
     syncedLines.forEach((line, index) => {
-      const classes = ["spotify-lyrics-line"];
-      if (!line.text) classes.push("spotify-lyrics-line-blank");
-      if (index === activeLineIndex) classes.push("spotify-lyrics-line-active");
-      else if (index < activeLineIndex) classes.push("spotify-lyrics-line-past");
-      else classes.push("spotify-lyrics-line-future");
-      line.el.className = classes.join(" ");
+      line.el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
     });
 
     const activeLine = syncedLines[activeLineIndex];
@@ -187,9 +192,9 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
 
   function renderSyncedLyrics(lines: Array<{ timeMs: number; text: string }>) {
     body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
-    syncedLines = lines.map((line) => {
+    syncedLines = lines.map((line, index) => {
       const el = document.createElement("div");
-      el.className = `spotify-lyrics-line${line.text ? " spotify-lyrics-line-future" : " spotify-lyrics-line-blank spotify-lyrics-line-future"}`;
+      el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
       el.textContent = line.text || " ";
       el.addEventListener("click", () => onSeek?.(line.timeMs));
       body.appendChild(el);

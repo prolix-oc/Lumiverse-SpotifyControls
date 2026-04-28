@@ -9,6 +9,23 @@ export interface CrossfadeArt {
   destroy(): void;
 }
 
+export function getTrackScopedArtUrl(
+  url: string | null,
+  trackUri: string | null | undefined
+): string | null {
+  if (!url) return null;
+  if (!trackUri) return url;
+
+  try {
+    const scopedUrl = new URL(url);
+    scopedUrl.searchParams.set("track", trackUri);
+    return scopedUrl.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}track=${encodeURIComponent(trackUri)}`;
+  }
+}
+
 export function createCrossfadeArt(className: string): CrossfadeArt {
   const el = document.createElement("div");
   el.className = `${className} spotify-crossfade-art`;
