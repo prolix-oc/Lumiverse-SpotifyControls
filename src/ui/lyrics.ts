@@ -78,7 +78,13 @@ function getLineClassName(index: number, activeLineIndex: number, hasText: boole
   if (index === activeLineIndex) classes.push("spotify-lyrics-line-active");
   else if (index < activeLineIndex) classes.push("spotify-lyrics-line-past");
   else classes.push("spotify-lyrics-line-future");
-  if (activeLineIndex >= 0 && Math.abs(index - activeLineIndex) === 1) classes.push("spotify-lyrics-line-near");
+  if (activeLineIndex >= 0) {
+    const distance = Math.abs(index - activeLineIndex);
+    if (distance === 1) classes.push("spotify-lyrics-line-tier-1");
+    else if (distance === 2) classes.push("spotify-lyrics-line-tier-2");
+    else if (distance === 3) classes.push("spotify-lyrics-line-tier-3");
+    else if (distance >= 4) classes.push("spotify-lyrics-line-tier-4");
+  }
   return classes.join(" ");
 }
 

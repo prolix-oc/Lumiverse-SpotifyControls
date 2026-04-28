@@ -970,8 +970,22 @@ var PANEL_CSS = `
   filter: brightness(1.12);
 }
 
-.spotify-lyrics-line-near {
+.spotify-lyrics-line-tier-1 {
+  --spotify-lyrics-line-opacity: 0.78;
   color: var(--lumiverse-text-muted);
+}
+
+.spotify-lyrics-line-tier-2 {
+  --spotify-lyrics-line-opacity: 0.56;
+  color: var(--lumiverse-text-muted);
+}
+
+.spotify-lyrics-line-tier-3 {
+  --spotify-lyrics-line-opacity: 0.38;
+}
+
+.spotify-lyrics-line-tier-4 {
+  --spotify-lyrics-line-opacity: 0.24;
 }
 
 .spotify-lyrics-line-past {
@@ -982,9 +996,24 @@ var PANEL_CSS = `
   --spotify-lyrics-line-opacity: 0.42;
 }
 
-.spotify-lyrics-line-past.spotify-lyrics-line-near,
-.spotify-lyrics-line-future.spotify-lyrics-line-near {
-  --spotify-lyrics-line-opacity: 0.72;
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-1,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-1 {
+  --spotify-lyrics-line-opacity: 0.78;
+}
+
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-2,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-2 {
+  --spotify-lyrics-line-opacity: 0.56;
+}
+
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-3,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-3 {
+  --spotify-lyrics-line-opacity: 0.38;
+}
+
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-4,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-4 {
+  --spotify-lyrics-line-opacity: 0.24;
 }
 
 .spotify-lyrics-line-blank {
@@ -2130,8 +2159,17 @@ function getLineClassName(index, activeLineIndex, hasText) {
     classes.push("spotify-lyrics-line-past");
   else
     classes.push("spotify-lyrics-line-future");
-  if (activeLineIndex >= 0 && Math.abs(index - activeLineIndex) === 1)
-    classes.push("spotify-lyrics-line-near");
+  if (activeLineIndex >= 0) {
+    const distance = Math.abs(index - activeLineIndex);
+    if (distance === 1)
+      classes.push("spotify-lyrics-line-tier-1");
+    else if (distance === 2)
+      classes.push("spotify-lyrics-line-tier-2");
+    else if (distance === 3)
+      classes.push("spotify-lyrics-line-tier-3");
+    else if (distance >= 4)
+      classes.push("spotify-lyrics-line-tier-4");
+  }
   return classes.join(" ");
 }
 function getLineDisplayText(text) {

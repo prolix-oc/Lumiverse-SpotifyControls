@@ -969,8 +969,22 @@ export const PANEL_CSS = `
   filter: brightness(1.12);
 }
 
-.spotify-lyrics-line-near {
+.spotify-lyrics-line-tier-1 {
+  --spotify-lyrics-line-opacity: 0.78;
   color: var(--lumiverse-text-muted);
+}
+
+.spotify-lyrics-line-tier-2 {
+  --spotify-lyrics-line-opacity: 0.56;
+  color: var(--lumiverse-text-muted);
+}
+
+.spotify-lyrics-line-tier-3 {
+  --spotify-lyrics-line-opacity: 0.38;
+}
+
+.spotify-lyrics-line-tier-4 {
+  --spotify-lyrics-line-opacity: 0.24;
 }
 
 .spotify-lyrics-line-past {
@@ -981,9 +995,24 @@ export const PANEL_CSS = `
   --spotify-lyrics-line-opacity: 0.42;
 }
 
-.spotify-lyrics-line-past.spotify-lyrics-line-near,
-.spotify-lyrics-line-future.spotify-lyrics-line-near {
-  --spotify-lyrics-line-opacity: 0.72;
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-1,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-1 {
+  --spotify-lyrics-line-opacity: 0.78;
+}
+
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-2,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-2 {
+  --spotify-lyrics-line-opacity: 0.56;
+}
+
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-3,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-3 {
+  --spotify-lyrics-line-opacity: 0.38;
+}
+
+.spotify-lyrics-line-past.spotify-lyrics-line-tier-4,
+.spotify-lyrics-line-future.spotify-lyrics-line-tier-4 {
+  --spotify-lyrics-line-opacity: 0.24;
 }
 
 .spotify-lyrics-line-blank {
