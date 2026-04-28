@@ -200,6 +200,17 @@ export function createMiniPlayerUI(
   const lyricsBody = document.createElement("div");
   lyricsBody.className = "spotify-mini-lyrics-body";
 
+  const lyricsStatus = document.createElement("div");
+  lyricsStatus.className = "spotify-mini-lyrics-status";
+
+  const lyricLineEls = Array.from({ length: 5 }, () => {
+    const el = document.createElement("div");
+    el.className = "spotify-mini-lyric-line";
+    lyricsBody.appendChild(el);
+    return el;
+  });
+  lyricsBody.appendChild(lyricsStatus);
+
   lyricsSection.appendChild(lyricsHeader);
   lyricsSection.appendChild(lyricsBody);
 
@@ -230,6 +241,26 @@ export function createMiniPlayerUI(
   let lyricsInstrumental = false;
   let lyricsLoading = false;
   let activeLyricLineIndex = -1;
+
+  function setLyricsStatus(message: string, loading = false) {
+    lyricsStatus.className = loading
+      ? "spotify-mini-lyrics-status spotify-mini-lyrics-status-loading"
+      : "spotify-mini-lyrics-status";
+    lyricsStatus.textContent = message;
+    lyricsStatus.style.display = "";
+    for (const el of lyricLineEls) {
+      el.style.display = "none";
+      el.textContent = "";
+      el.className = "spotify-mini-lyric-line";
+    }
+  }
+
+  function showLyricRows() {
+    lyricsStatus.style.display = "none";
+    for (const el of lyricLineEls) {
+      el.style.display = "";
+    }
+  }
 
   function getInterpolatedProgressMs(): number {
     if (!lastIsPlaying) return lastProgressMs;
@@ -264,27 +295,21 @@ export function createMiniPlayerUI(
   }
 
   function renderLyricsWindow() {
-    lyricsBody.innerHTML = "";
-
     if (lyricsLoading) {
-      const status = document.createElement("div");
-      status.className = "spotify-mini-lyrics-status spotify-mini-lyrics-status-loading";
-      status.textContent = "Loading lyrics...";
-      lyricsBody.appendChild(status);
+      setLyricsStatus("Loading lyrics...", true);
       return;
     }
 
     if (lyricsInstrumental) {
-      const status = document.createElement("div");
-      status.className = "spotify-mini-lyrics-status";
-      status.textContent = "♪ Instrumental";
-      lyricsBody.appendChild(status);
+      setLyricsStatus("♪ Instrumental");
       return;
     }
 
     if (syncedLyrics.length > 0) {
-      for (const line of getLyricWindow()) {
-        const el = document.createElement("div");
+      showLyricRows();
+      const lines = getLyricWindow();
+      lyricLineEls.forEach((el, idx) => {
+        const line = lines[idx] ?? { text: " ", index: -1 - idx };
         const distance = activeLyricLineIndex < 0 ? line.index : Math.abs(line.index - activeLyricLineIndex);
         el.className = "spotify-mini-lyric-line";
         if (line.index === activeLyricLineIndex) el.classList.add("spotify-mini-lyric-line-active");
@@ -292,25 +317,20 @@ export function createMiniPlayerUI(
         else if (distance === 2) el.classList.add("spotify-mini-lyric-line-mid");
         else el.classList.add("spotify-mini-lyric-line-far");
         el.textContent = line.text;
-        lyricsBody.appendChild(el);
-      }
+      });
       return;
     }
 
     if (plainLyricLines.length > 0) {
-      for (const line of plainLyricLines) {
-        const el = document.createElement("div");
+      showLyricRows();
+      lyricLineEls.forEach((el, idx) => {
         el.className = "spotify-mini-lyric-line spotify-mini-lyric-line-plain";
-        el.textContent = line;
-        lyricsBody.appendChild(el);
-      }
+        el.textContent = plainLyricLines[idx] ?? " ";
+      });
       return;
     }
 
-    const status = document.createElement("div");
-    status.className = "spotify-mini-lyrics-status";
-    status.textContent = "No lyrics available";
-    lyricsBody.appendChild(status);
+    setLyricsStatus("No lyrics available");
   }
 
   function updateActiveLyricLine(force = false) {
