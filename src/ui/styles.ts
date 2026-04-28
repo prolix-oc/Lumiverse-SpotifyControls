@@ -960,13 +960,11 @@ export const PANEL_CSS = `
 .spotify-lyrics-line-active {
   --spotify-lyrics-line-opacity: 1;
   color: var(--lumiverse-text);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.02) 100%);
   opacity: 1;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045), 0 10px 28px rgba(0, 0, 0, 0.16);
 }
 
 .spotify-lyrics-line-active .spotify-lyrics-line-text {
-  transform: scale(1.08);
+  transform: scale(1.1);
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.1);
   filter: brightness(1.12);
 }
