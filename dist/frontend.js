@@ -522,6 +522,10 @@ var PANEL_CSS = `
   height: var(--spotify-modern-widget-collapsed-size);
 }
 
+.spotify-modern-widget-player[data-expanded="true"] {
+  min-height: 420px;
+}
+
 .spotify-modern-widget-compact,
 .spotify-modern-widget-expanded {
   position: absolute;
@@ -542,19 +546,24 @@ var PANEL_CSS = `
 .spotify-modern-widget-compact {
   border-radius: inherit;
   overflow: hidden;
+  padding: 5px;
+  box-sizing: border-box;
 }
 
 .spotify-modern-widget-compact-art {
   width: 100%;
   height: 100%;
+  border-radius: max(14px, calc(var(--spotify-modern-widget-collapsed-size) * 0.24));
+  overflow: hidden;
 }
 
 .spotify-modern-widget-compact-fallback {
   position: absolute;
-  inset: 0;
+  inset: 5px;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: max(14px, calc(var(--spotify-modern-widget-collapsed-size) * 0.24));
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
 }
 
@@ -566,10 +575,11 @@ var PANEL_CSS = `
 
 .spotify-modern-widget-compact-overlay {
   position: absolute;
-  inset: auto 0 0 0;
-  padding: 8px;
+  inset: auto 5px 5px 5px;
+  padding: 8px 8px 7px;
   display: grid;
   gap: 6px;
+  border-radius: 0 0 max(14px, calc(var(--spotify-modern-widget-collapsed-size) * 0.24)) max(14px, calc(var(--spotify-modern-widget-collapsed-size) * 0.24));
   background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(7, 7, 9, 0.72) 100%);
 }
 
@@ -599,9 +609,10 @@ var PANEL_CSS = `
 .spotify-modern-widget-expanded {
   display: grid;
   grid-template-rows: auto auto auto 1fr auto auto auto;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 14px 14px 12px;
   box-sizing: border-box;
+  min-height: 100%;
 }
 
 .spotify-modern-widget-header {
@@ -751,17 +762,23 @@ var PANEL_CSS = `
   display: grid;
   gap: 8px;
   min-height: 0;
-  padding: 14px;
+  padding: 14px 14px 12px;
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  overflow: hidden;
 }
 
 .spotify-modern-widget-lyrics-body {
-  min-height: 144px;
+  min-height: 132px;
+  max-height: 176px;
   display: grid;
   align-content: center;
   gap: 4px;
+  overflow: hidden;
+  position: relative;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
 }
 
 .spotify-modern-widget-lyrics-status {
@@ -777,14 +794,19 @@ var PANEL_CSS = `
 
 .spotify-modern-widget-lyric-line {
   text-align: center;
-  font-size: 17px;
-  line-height: 1.3;
+  font-size: 16px;
+  line-height: 1.24;
   font-weight: 600;
   letter-spacing: -0.018em;
   color: rgba(255, 255, 255, 0.22);
   white-space: pre-wrap;
   text-wrap: pretty;
   transition: color 220ms ease, transform 220ms ease, text-shadow 220ms ease;
+}
+
+.spotify-modern-widget-lyric-line-enter {
+  animation: spotify-lyrics-line-in 360ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
+  animation-delay: var(--spotify-modern-lyric-enter-delay, 0ms);
 }
 
 .spotify-modern-widget-lyric-line.active {
@@ -811,6 +833,7 @@ var PANEL_CSS = `
   align-items: center;
   justify-content: center;
   gap: 12px;
+  margin-top: auto;
 }
 
 .spotify-modern-widget-btn {
@@ -851,6 +874,7 @@ var PANEL_CSS = `
   align-items: center;
   gap: 8px;
   padding: 0 6px 2px;
+  margin-top: -2px;
 }
 
 .spotify-modern-widget-volume-icon {
@@ -3444,6 +3468,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   let lyricsLoading = false;
   let activeLyricLineIndex = -1;
   let volumeDebounce = null;
+  let lastRenderedLyricSignature = "";
   function renderCompactArt(trackArtUrl) {
     compactArt.setUrl(trackArtUrl);
     compactFallback.style.display = trackArtUrl ? "none" : "flex";
@@ -3469,6 +3494,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   function renderLyrics() {
     lyricsBody.innerHTML = "";
     if (!connected || !state) {
+      lastRenderedLyricSignature = "";
       const status2 = document.createElement("div");
       status2.className = "spotify-modern-widget-lyrics-status";
       status2.textContent = connected ? "Start playback to see lyrics" : "Connect Spotify to see lyrics";
@@ -3476,6 +3502,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       return;
     }
     if (lyricsLoading) {
+      lastRenderedLyricSignature = "loading";
       const status2 = document.createElement("div");
       status2.className = "spotify-modern-widget-lyrics-status spotify-modern-widget-lyrics-status-loading";
       status2.textContent = "Loading lyrics...";
@@ -3483,6 +3510,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       return;
     }
     if (lyricsInstrumental) {
+      lastRenderedLyricSignature = "instrumental";
       const status2 = document.createElement("div");
       status2.className = "spotify-modern-widget-lyrics-status";
       status2.textContent = "♪ Instrumental";
@@ -3490,7 +3518,11 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       return;
     }
     if (syncedLyrics.length > 0 && state.trackUri === lyricsTrackUri) {
-      for (const line of getLyricWindow()) {
+      const lyricWindow = getLyricWindow();
+      const nextSignature = lyricWindow.map((line) => `${line.index}:${line.text}`).join("|");
+      const shouldAnimate = nextSignature !== lastRenderedLyricSignature;
+      lastRenderedLyricSignature = nextSignature;
+      lyricWindow.forEach((line, renderIndex) => {
         const el = document.createElement("div");
         const distance = activeLyricLineIndex < 0 ? line.index : Math.abs(line.index - activeLyricLineIndex);
         el.className = "spotify-modern-widget-lyric-line";
@@ -3502,20 +3534,32 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
           el.classList.add("mid");
         else
           el.classList.add("far");
+        if (shouldAnimate) {
+          el.classList.add("spotify-modern-widget-lyric-line-enter");
+          el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 26, 120)}ms`);
+        }
         el.textContent = line.text;
         lyricsBody.appendChild(el);
-      }
+      });
       return;
     }
     if (plainLyricLines.length > 0) {
-      for (const line of plainLyricLines) {
+      const nextSignature = plainLyricLines.join("|");
+      const shouldAnimate = nextSignature !== lastRenderedLyricSignature;
+      lastRenderedLyricSignature = nextSignature;
+      plainLyricLines.forEach((line, renderIndex) => {
         const el = document.createElement("div");
         el.className = "spotify-modern-widget-lyric-line plain";
+        if (shouldAnimate) {
+          el.classList.add("spotify-modern-widget-lyric-line-enter");
+          el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 20, 100)}ms`);
+        }
         el.textContent = line;
         lyricsBody.appendChild(el);
-      }
+      });
       return;
     }
+    lastRenderedLyricSignature = "empty";
     const status = document.createElement("div");
     status.className = "spotify-modern-widget-lyrics-status";
     status.textContent = "No lyrics available";
@@ -3947,7 +3991,7 @@ function setup(ctx) {
   function getModernExpandedSize() {
     return {
       width: Math.max(300, Math.min(348, window.innerWidth - 24)),
-      height: Math.max(380, Math.min(456, window.innerHeight - 24))
+      height: Math.max(420, Math.min(520, window.innerHeight - 24))
     };
   }
   function setModernWidgetExpanded(expanded) {

@@ -339,7 +339,7 @@ export function setup(ctx: SpindleFrontendContext) {
   function getModernExpandedSize() {
     return {
       width: Math.max(300, Math.min(348, window.innerWidth - 24)),
-      height: Math.max(380, Math.min(456, window.innerHeight - 24)),
+      height: Math.max(420, Math.min(520, window.innerHeight - 24)),
     };
   }
 

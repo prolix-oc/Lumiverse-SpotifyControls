@@ -225,6 +225,7 @@ export function createModernWidgetPlayerUI(
   let lyricsLoading = false;
   let activeLyricLineIndex = -1;
   let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
+  let lastRenderedLyricSignature = "";
 
   function renderCompactArt(trackArtUrl: string | null) {
     compactArt.setUrl(trackArtUrl);
@@ -254,6 +255,7 @@ export function createModernWidgetPlayerUI(
     lyricsBody.innerHTML = "";
 
     if (!connected || !state) {
+      lastRenderedLyricSignature = "";
       const status = document.createElement("div");
       status.className = "spotify-modern-widget-lyrics-status";
       status.textContent = connected ? "Start playback to see lyrics" : "Connect Spotify to see lyrics";
@@ -262,6 +264,7 @@ export function createModernWidgetPlayerUI(
     }
 
     if (lyricsLoading) {
+      lastRenderedLyricSignature = "loading";
       const status = document.createElement("div");
       status.className = "spotify-modern-widget-lyrics-status spotify-modern-widget-lyrics-status-loading";
       status.textContent = "Loading lyrics...";
@@ -270,6 +273,7 @@ export function createModernWidgetPlayerUI(
     }
 
     if (lyricsInstrumental) {
+      lastRenderedLyricSignature = "instrumental";
       const status = document.createElement("div");
       status.className = "spotify-modern-widget-lyrics-status";
       status.textContent = "♪ Instrumental";
@@ -278,7 +282,12 @@ export function createModernWidgetPlayerUI(
     }
 
     if (syncedLyrics.length > 0 && state.trackUri === lyricsTrackUri) {
-      for (const line of getLyricWindow()) {
+      const lyricWindow = getLyricWindow();
+      const nextSignature = lyricWindow.map((line) => `${line.index}:${line.text}`).join("|");
+      const shouldAnimate = nextSignature !== lastRenderedLyricSignature;
+      lastRenderedLyricSignature = nextSignature;
+
+      lyricWindow.forEach((line, renderIndex) => {
         const el = document.createElement("div");
         const distance = activeLyricLineIndex < 0 ? line.index : Math.abs(line.index - activeLyricLineIndex);
         el.className = "spotify-modern-widget-lyric-line";
@@ -286,21 +295,35 @@ export function createModernWidgetPlayerUI(
         else if (distance === 1) el.classList.add("near");
         else if (distance === 2) el.classList.add("mid");
         else el.classList.add("far");
+        if (shouldAnimate) {
+          el.classList.add("spotify-modern-widget-lyric-line-enter");
+          el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 26, 120)}ms`);
+        }
         el.textContent = line.text;
         lyricsBody.appendChild(el);
-      }
+      });
       return;
     }
 
     if (plainLyricLines.length > 0) {
-      for (const line of plainLyricLines) {
+      const nextSignature = plainLyricLines.join("|");
+      const shouldAnimate = nextSignature !== lastRenderedLyricSignature;
+      lastRenderedLyricSignature = nextSignature;
+
+      plainLyricLines.forEach((line, renderIndex) => {
         const el = document.createElement("div");
         el.className = "spotify-modern-widget-lyric-line plain";
+        if (shouldAnimate) {
+          el.classList.add("spotify-modern-widget-lyric-line-enter");
+          el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 20, 100)}ms`);
+        }
         el.textContent = line;
         lyricsBody.appendChild(el);
-      }
+      });
       return;
     }
+
+    lastRenderedLyricSignature = "empty";
 
     const status = document.createElement("div");
     status.className = "spotify-modern-widget-lyrics-status";
