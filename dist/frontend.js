@@ -920,6 +920,7 @@ var PANEL_CSS = `
 
 .spotify-lyrics-line {
   --spotify-lyrics-line-opacity: 1;
+  --spotify-lyrics-line-scale: 0.98;
   display: block;
   width: 100%;
   box-sizing: border-box;
@@ -934,10 +935,10 @@ var PANEL_CSS = `
   border-radius: 10px;
   letter-spacing: -0.015em;
   opacity: var(--spotify-lyrics-line-opacity);
-  transform: translateY(0);
+  transform: translateY(0) scale(var(--spotify-lyrics-line-scale));
   transform-origin: center center;
   cursor: pointer;
-  transition: color 160ms ease, opacity 160ms ease, background 160ms ease, text-shadow 160ms ease, filter 160ms ease;
+  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease, font-size 160ms ease, text-shadow 160ms ease;
 }
 
 .spotify-lyrics-line-enter {
@@ -951,14 +952,17 @@ var PANEL_CSS = `
 
 .spotify-lyrics-line-active {
   --spotify-lyrics-line-opacity: 1;
+  --spotify-lyrics-line-scale: 1.08;
   color: var(--lumiverse-text);
   background: transparent;
+  font-weight: 700;
   opacity: 1;
-  text-shadow: 0 0 22px rgba(255, 255, 255, 0.1);
-  filter: brightness(1.18);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
 }
 
 .spotify-lyrics-line-near {
+  --spotify-lyrics-line-scale: 1.01;
   color: var(--lumiverse-text-muted);
 }
 
@@ -1000,13 +1004,13 @@ var PANEL_CSS = `
 @keyframes spotify-lyrics-line-in {
   from {
     opacity: 0;
-    transform: translateY(16px);
+    transform: translateY(16px) scale(0.95);
     filter: blur(8px);
   }
 
   to {
     opacity: var(--spotify-lyrics-line-opacity);
-    transform: translateY(0);
+    transform: translateY(0) scale(var(--spotify-lyrics-line-scale));
     filter: blur(0);
   }
 }
