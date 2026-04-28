@@ -28,6 +28,11 @@ const USER_SCROLL_SUPPRESS_MS = 2500;
 const LOADING_STATUS_DELAY_MS = 180;
 const EMPTY_SYNCED_LINE_SYMBOL = "♪";
 
+interface UpdateLineClassesOptions {
+  forceCenter?: boolean;
+  behavior?: ScrollBehavior;
+}
+
 function parseTimestamp(raw: string): number | null {
   const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
   if (!match) return null;
@@ -150,21 +155,28 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     return Math.min(playback.progressMs + Date.now() - playback.updatedAt, playback.durationMs || Infinity);
   }
 
-  function updateLineClasses(nextActiveLineIndex: number) {
+  function centerLine(line: SyncedLyricLine, behavior: ScrollBehavior = "smooth") {
+    requestAnimationFrame(() => {
+      const bodyRect = body.getBoundingClientRect();
+      const textRect = line.textEl.getBoundingClientRect();
+      const targetScrollTop = body.scrollTop + (textRect.top + textRect.height / 2) - (bodyRect.top + body.clientHeight / 2);
+      const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+      body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior });
+    });
+  }
+
+  function updateLineClasses(nextActiveLineIndex: number, options: UpdateLineClassesOptions = {}) {
     activeLineIndex = nextActiveLineIndex;
     syncedLines.forEach((line, index) => {
       line.el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
     });
 
     const activeLine = syncedLines[activeLineIndex];
-    if (activeLine && Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS) {
+    const shouldCenter = options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
+    if (activeLine && shouldCenter) {
       isAutoScrolling = true;
       if (autoScrollTimer) clearTimeout(autoScrollTimer);
-      requestAnimationFrame(() => {
-        const targetScrollTop = activeLine.el.offsetTop + activeLine.el.offsetHeight / 2 - body.clientHeight / 2;
-        const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
-        body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior: "smooth" });
-      });
+      centerLine(activeLine, options.behavior);
       autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
     }
   }
@@ -230,7 +242,10 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
       textEl.className = "spotify-lyrics-line-text";
       textEl.textContent = getLineDisplayText(line.text);
       el.appendChild(textEl);
-      el.addEventListener("click", () => onSeek?.(line.timeMs));
+      el.addEventListener("click", () => {
+        updateLineClasses(index, { forceCenter: true, behavior: "smooth" });
+        onSeek?.(line.timeMs);
+      });
       body.appendChild(el);
       return { ...line, el, textEl };
     });

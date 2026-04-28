@@ -965,7 +965,7 @@ var PANEL_CSS = `
 }
 
 .spotify-lyrics-line-active .spotify-lyrics-line-text {
-  transform: scale(1.1);
+  transform: scale(1.17);
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.1);
   filter: brightness(1.12);
 }
@@ -2199,21 +2199,27 @@ function createLyricsUI(onSeek) {
       return playback.progressMs;
     return Math.min(playback.progressMs + Date.now() - playback.updatedAt, playback.durationMs || Infinity);
   }
-  function updateLineClasses(nextActiveLineIndex) {
+  function centerLine(line, behavior = "smooth") {
+    requestAnimationFrame(() => {
+      const bodyRect = body.getBoundingClientRect();
+      const textRect = line.textEl.getBoundingClientRect();
+      const targetScrollTop = body.scrollTop + (textRect.top + textRect.height / 2) - (bodyRect.top + body.clientHeight / 2);
+      const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+      body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior });
+    });
+  }
+  function updateLineClasses(nextActiveLineIndex, options = {}) {
     activeLineIndex = nextActiveLineIndex;
     syncedLines.forEach((line, index) => {
       line.el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
     });
     const activeLine = syncedLines[activeLineIndex];
-    if (activeLine && Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS) {
+    const shouldCenter = options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
+    if (activeLine && shouldCenter) {
       isAutoScrolling = true;
       if (autoScrollTimer)
         clearTimeout(autoScrollTimer);
-      requestAnimationFrame(() => {
-        const targetScrollTop = activeLine.el.offsetTop + activeLine.el.offsetHeight / 2 - body.clientHeight / 2;
-        const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
-        body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior: "smooth" });
-      });
+      centerLine(activeLine, options.behavior);
       autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
     }
   }
@@ -2276,7 +2282,10 @@ function createLyricsUI(onSeek) {
       textEl.className = "spotify-lyrics-line-text";
       textEl.textContent = getLineDisplayText(line.text);
       el.appendChild(textEl);
-      el.addEventListener("click", () => onSeek?.(line.timeMs));
+      el.addEventListener("click", () => {
+        updateLineClasses(index, { forceCenter: true, behavior: "smooth" });
+        onSeek?.(line.timeMs);
+      });
       body.appendChild(el);
       return { ...line, el, textEl };
     });

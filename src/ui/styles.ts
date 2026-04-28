@@ -964,7 +964,7 @@ export const PANEL_CSS = `
 }
 
 .spotify-lyrics-line-active .spotify-lyrics-line-text {
-  transform: scale(1.1);
+  transform: scale(1.17);
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.1);
   filter: brightness(1.12);
 }
