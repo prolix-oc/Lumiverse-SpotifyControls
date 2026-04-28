@@ -378,6 +378,15 @@ export function setup(ctx: SpindleFrontendContext) {
   const widgetContent = document.createElement("div");
   widgetContent.className = "spotify-float-widget";
 
+  function animateWidgetMount() {
+    widgetContent.classList.remove("spotify-float-widget-mounted");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        widgetContent.classList.add("spotify-float-widget-mounted");
+      });
+    });
+  }
+
   const legacyWidgetVisual = document.createElement("div");
   legacyWidgetVisual.className = "spotify-float-widget-legacy";
 
@@ -400,6 +409,7 @@ export function setup(ctx: SpindleFrontendContext) {
   );
   widgetContent.appendChild(modernWidget.root);
   widget.root.appendChild(widgetContent);
+  animateWidgetMount();
 
   function getModernExpandedSize() {
     return {
@@ -676,6 +686,7 @@ export function setup(ctx: SpindleFrontendContext) {
 
     applyWidgetStyle();
     widget.root.appendChild(widgetContent);
+    animateWidgetMount();
     widget.moveTo(pos.x, pos.y);
     widget.onDragEnd((pos) => debounceSavePosition(pos));
     clampWidgetPosition();

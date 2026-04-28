@@ -36,6 +36,10 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
   imgB.className = "spotify-crossfade-img";
   imgA.alt = "Album art";
   imgB.alt = "Album art";
+  imgA.loading = "lazy";
+  imgB.loading = "lazy";
+  imgA.decoding = "async";
+  imgB.decoding = "async";
 
   // A starts visible
   imgA.style.opacity = "1";

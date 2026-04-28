@@ -470,8 +470,13 @@ var PANEL_CSS = `
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: box-shadow var(--lumiverse-transition-fast);
+  opacity: 0;
+  transition: box-shadow var(--lumiverse-transition-fast), opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
   touch-action: none;
+}
+
+.spotify-float-widget.spotify-float-widget-mounted {
+  opacity: 1;
 }
 
 .spotify-float-widget:hover {
@@ -2172,6 +2177,10 @@ function createCrossfadeArt(className) {
   imgB.className = "spotify-crossfade-img";
   imgA.alt = "Album art";
   imgB.alt = "Album art";
+  imgA.loading = "lazy";
+  imgB.loading = "lazy";
+  imgA.decoding = "async";
+  imgB.decoding = "async";
   imgA.style.opacity = "1";
   imgB.style.opacity = "0";
   el.appendChild(imgA);
@@ -4441,6 +4450,14 @@ function setup(ctx) {
   cleanups.push(() => widget.destroy());
   const widgetContent = document.createElement("div");
   widgetContent.className = "spotify-float-widget";
+  function animateWidgetMount() {
+    widgetContent.classList.remove("spotify-float-widget-mounted");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        widgetContent.classList.add("spotify-float-widget-mounted");
+      });
+    });
+  }
   const legacyWidgetVisual = document.createElement("div");
   legacyWidgetVisual.className = "spotify-float-widget-legacy";
   const widgetIcon = document.createElement("div");
@@ -4455,6 +4472,7 @@ function setup(ctx) {
   const modernWidget = createModernWidgetPlayerUI(sendToBackend, () => tab.activate(), () => setModernWidgetExpanded(false));
   widgetContent.appendChild(modernWidget.root);
   widget.root.appendChild(widgetContent);
+  animateWidgetMount();
   function getModernExpandedSize() {
     return {
       width: Math.max(300, Math.min(348, window.innerWidth - 24)),
@@ -4688,6 +4706,7 @@ function setup(ctx) {
     });
     applyWidgetStyle();
     widget.root.appendChild(widgetContent);
+    animateWidgetMount();
     widget.moveTo(pos.x, pos.y);
     widget.onDragEnd((pos2) => debounceSavePosition(pos2));
     clampWidgetPosition();

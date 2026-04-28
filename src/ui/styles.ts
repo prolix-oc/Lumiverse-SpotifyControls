@@ -469,8 +469,13 @@ export const PANEL_CSS = `
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: box-shadow var(--lumiverse-transition-fast);
+  opacity: 0;
+  transition: box-shadow var(--lumiverse-transition-fast), opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
   touch-action: none;
+}
+
+.spotify-float-widget.spotify-float-widget-mounted {
+  opacity: 1;
 }
 
 .spotify-float-widget:hover {
