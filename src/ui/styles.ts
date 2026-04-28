@@ -520,7 +520,13 @@ export const PANEL_CSS = `
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   color: #fff;
-  transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, background 320ms ease;
+  transition:
+    width 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 320ms ease,
+    background 320ms ease;
 }
 
 [data-glass] .spotify-modern-widget-player {
@@ -759,27 +765,33 @@ export const PANEL_CSS = `
   position: relative;
   min-width: 0;
   overflow: hidden;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
-.spotify-modern-widget-marquee[data-overflow="true"]::before,
-.spotify-modern-widget-marquee[data-overflow="true"]::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 18px;
-  z-index: 1;
-  pointer-events: none;
+.spotify-modern-widget-marquee[data-overflow="true"] {
+  --spotify-modern-marquee-left-fade: 0px;
+  --spotify-modern-marquee-right-fade: 18px;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    black var(--spotify-modern-marquee-left-fade),
+    black calc(100% - var(--spotify-modern-marquee-right-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    black var(--spotify-modern-marquee-left-fade),
+    black calc(100% - var(--spotify-modern-marquee-right-fade)),
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
-.spotify-modern-widget-marquee[data-overflow="true"]::before {
-  left: 0;
-  background: linear-gradient(90deg, var(--spotify-modern-expanded-surface) 20%, transparent 100%);
-}
-
-.spotify-modern-widget-marquee[data-overflow="true"]::after {
-  right: 0;
-  background: linear-gradient(270deg, var(--spotify-modern-expanded-surface) 20%, transparent 100%);
+.spotify-modern-widget-marquee[data-overflow="true"][data-marquee-phase="scrolling"] {
+  --spotify-modern-marquee-left-fade: 18px;
 }
 
 .spotify-modern-widget-marquee-content {
@@ -1038,12 +1050,10 @@ export const PANEL_CSS = `
 }
 
 @keyframes spotify-modern-marquee {
-  0%,
-  12% {
+  0% {
     transform: translateX(0);
   }
 
-  88%,
   100% {
     transform: translateX(calc(-1 * var(--spotify-modern-marquee-distance, 0px)));
   }

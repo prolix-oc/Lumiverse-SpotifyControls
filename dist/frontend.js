@@ -521,7 +521,13 @@ var PANEL_CSS = `
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   color: #fff;
-  transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, background 320ms ease;
+  transition:
+    width 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 320ms ease,
+    background 320ms ease;
 }
 
 [data-glass] .spotify-modern-widget-player {
@@ -760,27 +766,33 @@ var PANEL_CSS = `
   position: relative;
   min-width: 0;
   overflow: hidden;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
-.spotify-modern-widget-marquee[data-overflow="true"]::before,
-.spotify-modern-widget-marquee[data-overflow="true"]::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 18px;
-  z-index: 1;
-  pointer-events: none;
+.spotify-modern-widget-marquee[data-overflow="true"] {
+  --spotify-modern-marquee-left-fade: 0px;
+  --spotify-modern-marquee-right-fade: 18px;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    black var(--spotify-modern-marquee-left-fade),
+    black calc(100% - var(--spotify-modern-marquee-right-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    black var(--spotify-modern-marquee-left-fade),
+    black calc(100% - var(--spotify-modern-marquee-right-fade)),
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
-.spotify-modern-widget-marquee[data-overflow="true"]::before {
-  left: 0;
-  background: linear-gradient(90deg, var(--spotify-modern-expanded-surface) 20%, transparent 100%);
-}
-
-.spotify-modern-widget-marquee[data-overflow="true"]::after {
-  right: 0;
-  background: linear-gradient(270deg, var(--spotify-modern-expanded-surface) 20%, transparent 100%);
+.spotify-modern-widget-marquee[data-overflow="true"][data-marquee-phase="scrolling"] {
+  --spotify-modern-marquee-left-fade: 18px;
 }
 
 .spotify-modern-widget-marquee-content {
@@ -1039,12 +1051,10 @@ var PANEL_CSS = `
 }
 
 @keyframes spotify-modern-marquee {
-  0%,
-  12% {
+  0% {
     transform: translateX(0);
   }
 
-  88%,
   100% {
     transform: translateX(calc(-1 * var(--spotify-modern-marquee-distance, 0px)));
   }
@@ -3215,6 +3225,7 @@ var ICON_VOLUME3 = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5
 var ICON_EXPAND2 = `<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>`;
 var ICON_COLLAPSE2 = `<svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>`;
 var ICON_NOTE = `<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
+var MARQUEE_REST_MS = 4000;
 function formatTime3(ms) {
   const totalSec = Math.floor(ms / 1000);
   const min = Math.floor(totalSec / 60);
@@ -3233,9 +3244,34 @@ function stopEventPropagation(el) {
 function createMarqueeLabel(baseClass) {
   const root = document.createElement("div");
   root.className = `${baseClass} spotify-modern-widget-marquee`;
+  root.dataset.marqueePhase = "idle";
   const content = document.createElement("div");
   content.className = `${baseClass}-content spotify-modern-widget-marquee-content`;
   root.appendChild(content);
+  let marqueeStartTimer = null;
+  function stopMarquee() {
+    if (marqueeStartTimer) {
+      clearTimeout(marqueeStartTimer);
+      marqueeStartTimer = null;
+    }
+    root.dataset.marqueePhase = "idle";
+    content.classList.remove("spotify-modern-widget-marquee-animate");
+  }
+  function queueMarqueeStart(restart) {
+    if (marqueeStartTimer) {
+      clearTimeout(marqueeStartTimer);
+    }
+    root.dataset.marqueePhase = "rest";
+    content.classList.remove("spotify-modern-widget-marquee-animate");
+    if (restart) {
+      content.offsetWidth;
+    }
+    marqueeStartTimer = setTimeout(() => {
+      marqueeStartTimer = null;
+      root.dataset.marqueePhase = "scrolling";
+      content.classList.add("spotify-modern-widget-marquee-animate");
+    }, MARQUEE_REST_MS);
+  }
   return {
     root,
     setText(value) {
@@ -3245,7 +3281,7 @@ function createMarqueeLabel(baseClass) {
     refresh(expanded, restart = false) {
       if (!expanded) {
         root.dataset.overflow = "false";
-        content.classList.remove("spotify-modern-widget-marquee-animate");
+        stopMarquee();
         root.style.removeProperty("--spotify-modern-marquee-distance");
         root.style.removeProperty("--spotify-modern-marquee-duration");
         return;
@@ -3253,7 +3289,7 @@ function createMarqueeLabel(baseClass) {
       const overflow = Math.ceil(content.scrollWidth - root.clientWidth);
       if (overflow <= 6) {
         root.dataset.overflow = "false";
-        content.classList.remove("spotify-modern-widget-marquee-animate");
+        stopMarquee();
         root.style.removeProperty("--spotify-modern-marquee-distance");
         root.style.removeProperty("--spotify-modern-marquee-duration");
         return;
@@ -3261,11 +3297,11 @@ function createMarqueeLabel(baseClass) {
       root.dataset.overflow = "true";
       root.style.setProperty("--spotify-modern-marquee-distance", `${overflow}px`);
       root.style.setProperty("--spotify-modern-marquee-duration", `${Math.max(8, Math.min(20, 8 + overflow / 18))}s`);
-      if (restart) {
-        content.classList.remove("spotify-modern-widget-marquee-animate");
-        content.offsetWidth;
+      const isQueued = marqueeStartTimer !== null;
+      const isScrolling = root.dataset.marqueePhase === "scrolling";
+      if (restart || !isQueued && !isScrolling) {
+        queueMarqueeStart(restart);
       }
-      content.classList.add("spotify-modern-widget-marquee-animate");
     }
   };
 }
