@@ -243,6 +243,13 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
       textEl.textContent = getLineDisplayText(line.text);
       el.appendChild(textEl);
       el.addEventListener("click", () => {
+        if (playback && playback.trackUri === currentTrackUri) {
+          playback = {
+            ...playback,
+            progressMs: line.timeMs,
+            updatedAt: Date.now(),
+          };
+        }
         updateLineClasses(index, { forceCenter: true, behavior: "smooth" });
         onSeek?.(line.timeMs);
       });
