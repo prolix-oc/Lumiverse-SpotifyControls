@@ -514,6 +514,7 @@ export const PANEL_CSS = `
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(24px) saturate(1.15);
   color: #fff;
+  transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, background 320ms ease;
 }
 
 .spotify-modern-widget-player[data-expanded="false"] {
@@ -529,12 +530,14 @@ export const PANEL_CSS = `
 .spotify-modern-widget-expanded {
   position: absolute;
   inset: 0;
+  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), filter 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-expanded,
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-compact {
   opacity: 0;
   pointer-events: none;
+  filter: blur(6px);
 }
 
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-expanded,
@@ -614,6 +617,38 @@ export const PANEL_CSS = `
   min-height: 100%;
 }
 
+.spotify-modern-widget-header,
+.spotify-modern-widget-meta,
+.spotify-modern-widget-progress-row,
+.spotify-modern-widget-lyrics,
+.spotify-modern-widget-controls,
+.spotify-modern-widget-volume-row,
+.spotify-modern-widget-empty {
+  transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-header,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-meta,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-progress-row,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-lyrics,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-controls,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-volume-row,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-empty {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-header,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-meta,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-progress-row,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-lyrics,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-controls,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-volume-row,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-empty {
+  opacity: 1;
+  transform: none;
+}
+
 .spotify-modern-widget-header {
   display: flex;
   align-items: center;
@@ -674,6 +709,7 @@ export const PANEL_CSS = `
   height: 108px;
   border-radius: 24px;
   overflow: hidden;
+  transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease;
 }
 
 .spotify-modern-widget-art {

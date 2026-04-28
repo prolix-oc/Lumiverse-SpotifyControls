@@ -515,6 +515,7 @@ var PANEL_CSS = `
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(24px) saturate(1.15);
   color: #fff;
+  transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, background 320ms ease;
 }
 
 .spotify-modern-widget-player[data-expanded="false"] {
@@ -530,12 +531,14 @@ var PANEL_CSS = `
 .spotify-modern-widget-expanded {
   position: absolute;
   inset: 0;
+  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), filter 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-expanded,
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-compact {
   opacity: 0;
   pointer-events: none;
+  filter: blur(6px);
 }
 
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-expanded,
@@ -615,6 +618,38 @@ var PANEL_CSS = `
   min-height: 100%;
 }
 
+.spotify-modern-widget-header,
+.spotify-modern-widget-meta,
+.spotify-modern-widget-progress-row,
+.spotify-modern-widget-lyrics,
+.spotify-modern-widget-controls,
+.spotify-modern-widget-volume-row,
+.spotify-modern-widget-empty {
+  transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-header,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-meta,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-progress-row,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-lyrics,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-controls,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-volume-row,
+.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-empty {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-header,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-meta,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-progress-row,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-lyrics,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-controls,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-volume-row,
+.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-empty {
+  opacity: 1;
+  transform: none;
+}
+
 .spotify-modern-widget-header {
   display: flex;
   align-items: center;
@@ -675,6 +710,7 @@ var PANEL_CSS = `
   height: 108px;
   border-radius: 24px;
   overflow: hidden;
+  transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease;
 }
 
 .spotify-modern-widget-art {
@@ -2416,12 +2452,8 @@ function createSearchUI(sendToBackend) {
   };
 }
 
-// src/ui/lyrics.ts
-var USER_SCROLL_SUPPRESS_MS = 2500;
-var LOADING_STATUS_DELAY_MS = 180;
+// src/ui/synced-lyrics-model.ts
 var EMPTY_SYNCED_LINE_SYMBOL = "♪";
-var SEEK_SYNC_TOLERANCE_MS = 1400;
-var SEEK_STATE_GRACE_MS = 1800;
 function parseTimestamp(raw) {
   const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
   if (!match)
@@ -2457,29 +2489,6 @@ function parseSyncedLyrics(value) {
   }
   return grouped;
 }
-function getLineClassName(index, activeLineIndex, hasText) {
-  const classes = ["spotify-lyrics-line"];
-  if (!hasText)
-    classes.push("spotify-lyrics-line-blank");
-  if (index === activeLineIndex)
-    classes.push("spotify-lyrics-line-active");
-  else if (index < activeLineIndex)
-    classes.push("spotify-lyrics-line-past");
-  else
-    classes.push("spotify-lyrics-line-future");
-  if (activeLineIndex >= 0) {
-    const distance = Math.abs(index - activeLineIndex);
-    if (distance === 1)
-      classes.push("spotify-lyrics-line-tier-1");
-    else if (distance === 2)
-      classes.push("spotify-lyrics-line-tier-2");
-    else if (distance === 3)
-      classes.push("spotify-lyrics-line-tier-3");
-    else if (distance >= 4)
-      classes.push("spotify-lyrics-line-tier-4");
-  }
-  return classes.join(" ");
-}
 function getLineDisplayText(text) {
   return text || EMPTY_SYNCED_LINE_SYMBOL;
 }
@@ -2487,63 +2496,10 @@ function shouldReserveScaleGutter(text) {
   return !text.includes(`
 `) && text.length >= 36;
 }
-function createLyricsUI(onSeek) {
-  const root = document.createElement("div");
-  root.className = "spotify-section spotify-lyrics-section";
-  const title = document.createElement("h3");
-  title.className = "spotify-section-title";
-  title.textContent = "Lyrics";
-  root.appendChild(title);
-  const body = document.createElement("div");
-  body.className = "spotify-lyrics-body";
-  root.appendChild(body);
-  let currentTrackUri = null;
-  let syncedLines = [];
+function createSyncedLyricsModel(maxLines) {
+  let lyrics = [];
   let playback = null;
   let activeLineIndex = -1;
-  let tickTimer = null;
-  let autoScrollTimer = null;
-  let loadingTimer = null;
-  let isAutoScrolling = false;
-  let lastUserScrollAt = 0;
-  let pendingSeekPositionMs = null;
-  let pendingSeekUntil = 0;
-  function stopLoadingState() {
-    if (loadingTimer) {
-      clearTimeout(loadingTimer);
-      loadingTimer = null;
-    }
-    body.classList.remove("spotify-lyrics-loading");
-  }
-  function stopAutoScrollTracking() {
-    if (autoScrollTimer) {
-      clearTimeout(autoScrollTimer);
-      autoScrollTimer = null;
-    }
-    isAutoScrolling = false;
-  }
-  function noteUserScroll() {
-    stopAutoScrollTracking();
-    lastUserScrollAt = Date.now();
-  }
-  body.addEventListener("wheel", noteUserScroll, { passive: true });
-  body.addEventListener("touchmove", noteUserScroll, { passive: true });
-  body.addEventListener("pointerdown", noteUserScroll, { passive: true });
-  body.addEventListener("scroll", () => {
-    if (!isAutoScrolling)
-      lastUserScrollAt = Date.now();
-  }, { passive: true });
-  function stopTicking() {
-    if (tickTimer) {
-      clearInterval(tickTimer);
-      tickTimer = null;
-    }
-  }
-  function startTicking() {
-    if (tickTimer || syncedLines.length === 0)
-      return;
-    tickTimer = setInterval(updateActiveLine, 200);
-  }
   function getProgressMs() {
     if (!playback)
       return 0;
@@ -2551,198 +2507,64 @@ function createLyricsUI(onSeek) {
       return playback.progressMs;
     return Math.min(playback.progressMs + Date.now() - playback.updatedAt, playback.durationMs || Infinity);
   }
-  function centerLine(line, behavior = "smooth") {
-    requestAnimationFrame(() => {
-      const bodyRect = body.getBoundingClientRect();
-      const textRect = line.textEl.getBoundingClientRect();
-      const targetScrollTop = body.scrollTop + (textRect.top + textRect.height / 2) - (bodyRect.top + body.clientHeight / 2);
-      const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
-      body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior });
-    });
-  }
-  function updateLineClasses(nextActiveLineIndex, options = {}) {
-    activeLineIndex = nextActiveLineIndex;
-    syncedLines.forEach((line, index) => {
-      line.el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
-    });
-    const activeLine = syncedLines[activeLineIndex];
-    const shouldCenter = options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
-    if (activeLine && shouldCenter) {
-      isAutoScrolling = true;
-      if (autoScrollTimer)
-        clearTimeout(autoScrollTimer);
-      centerLine(activeLine, options.behavior);
-      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
+  function refreshActiveLineIndex() {
+    if (lyrics.length === 0) {
+      const changed2 = activeLineIndex !== -1;
+      activeLineIndex = -1;
+      return changed2;
     }
-  }
-  function updateActiveLine() {
-    if (syncedLines.length === 0)
-      return;
     const progressMs = getProgressMs();
     let nextActiveLineIndex = -1;
-    for (let i = 0;i < syncedLines.length; i++) {
-      if (syncedLines[i].timeMs > progressMs)
+    for (let i = 0;i < lyrics.length; i++) {
+      if (lyrics[i].timeMs > progressMs)
         break;
       nextActiveLineIndex = i;
     }
-    if (nextActiveLineIndex !== activeLineIndex) {
-      updateLineClasses(nextActiveLineIndex);
-    }
+    const changed = nextActiveLineIndex !== activeLineIndex;
+    activeLineIndex = nextActiveLineIndex;
+    return changed;
   }
-  function clear() {
-    stopTicking();
-    stopAutoScrollTracking();
-    stopLoadingState();
-    body.innerHTML = "";
-    body.className = "spotify-lyrics-body";
-    currentTrackUri = null;
-    syncedLines = [];
-    playback = null;
-    activeLineIndex = -1;
-    pendingSeekPositionMs = null;
-    pendingSeekUntil = 0;
-  }
-  function setLoading(loading) {
-    stopLoadingState();
-    if (!loading)
-      return;
-    if (loading) {
-      stopTicking();
-      stopAutoScrollTracking();
-      body.innerHTML = "";
-      body.className = "spotify-lyrics-body spotify-lyrics-loading";
-      syncedLines = [];
-      activeLineIndex = -1;
-      loadingTimer = setTimeout(() => {
-        loadingTimer = null;
-        if (!body.classList.contains("spotify-lyrics-loading"))
-          return;
-        const el = document.createElement("div");
-        el.className = "spotify-lyrics-status spotify-lyrics-status-loading";
-        el.textContent = "Loading lyrics...";
-        body.appendChild(el);
-      }, LOADING_STATUS_DELAY_MS);
-    }
-  }
-  function renderSyncedLyrics(lines) {
-    stopLoadingState();
-    body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
-    syncedLines = lines.map((line, index) => {
-      const el = document.createElement("div");
-      const textEl = document.createElement("div");
-      el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
-      el.classList.add("spotify-lyrics-line-enter");
-      el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(index * 28, 280)}ms`);
-      textEl.className = "spotify-lyrics-line-text";
-      if (!line.text)
-        textEl.classList.add("spotify-lyrics-line-symbol");
-      if (shouldReserveScaleGutter(line.text))
-        textEl.classList.add("spotify-lyrics-line-text-long");
-      textEl.textContent = getLineDisplayText(line.text);
-      el.appendChild(textEl);
-      el.addEventListener("click", () => {
-        pendingSeekPositionMs = line.timeMs;
-        pendingSeekUntil = Date.now() + SEEK_STATE_GRACE_MS;
-        if (playback && playback.trackUri === currentTrackUri) {
-          playback = {
-            ...playback,
-            progressMs: line.timeMs,
-            updatedAt: Date.now()
-          };
-        }
-        updateLineClasses(index, { forceCenter: true, behavior: "smooth" });
-        onSeek?.(line.timeMs);
-      });
-      body.appendChild(el);
-      return { ...line, el, textEl };
-    });
-    updateActiveLine();
-    if (playback?.isPlaying)
-      startTicking();
-  }
-  function renderPlainLyrics(lyrics) {
-    stopLoadingState();
-    body.className = "spotify-lyrics-body spotify-lyrics-has-content";
-    const pre = document.createElement("div");
-    pre.className = "spotify-lyrics-text spotify-lyrics-text-enter";
-    pre.textContent = lyrics;
-    body.appendChild(pre);
-  }
-  function update(trackUri, plainLyrics, syncedLyrics, instrumental) {
-    stopTicking();
-    stopAutoScrollTracking();
-    stopLoadingState();
-    currentTrackUri = trackUri;
-    body.innerHTML = "";
-    syncedLines = [];
-    activeLineIndex = -1;
-    if (instrumental) {
-      body.className = "spotify-lyrics-body";
-      const el = document.createElement("div");
-      el.className = "spotify-lyrics-status";
-      el.textContent = "♪ Instrumental";
-      body.appendChild(el);
-      return;
-    }
-    const parsedSyncedLyrics = parseSyncedLyrics(syncedLyrics);
-    if (parsedSyncedLyrics.length > 0) {
-      renderSyncedLyrics(parsedSyncedLyrics);
-      return;
-    }
-    if (!plainLyrics) {
-      body.className = "spotify-lyrics-body";
-      const el = document.createElement("div");
-      el.className = "spotify-lyrics-status";
-      el.textContent = "No lyrics available";
-      body.appendChild(el);
-      return;
-    }
-    renderPlainLyrics(plainLyrics);
-  }
-  function updatePlayback(state) {
-    if (!state || state.trackUri !== currentTrackUri) {
-      playback = null;
-      pendingSeekPositionMs = null;
-      pendingSeekUntil = 0;
-      stopTicking();
-      return;
-    }
-    if (pendingSeekPositionMs !== null) {
-      const isNearPendingSeek = Math.abs(state.progressMs - pendingSeekPositionMs) <= SEEK_SYNC_TOLERANCE_MS;
-      if (isNearPendingSeek) {
-        pendingSeekPositionMs = null;
-        pendingSeekUntil = 0;
-      } else if (Date.now() < pendingSeekUntil) {
-        return;
-      } else {
-        pendingSeekPositionMs = null;
-        pendingSeekUntil = 0;
-      }
-    }
-    playback = {
-      trackUri: state.trackUri,
-      progressMs: state.progressMs,
-      durationMs: state.durationMs,
-      isPlaying: state.isPlaying,
-      updatedAt: Date.now()
-    };
-    updateActiveLine();
-    if (state.isPlaying)
-      startTicking();
-    else
-      stopTicking();
+  function getVisibleLines() {
+    const indexed = lyrics.map((line, index) => ({
+      ...line,
+      index,
+      displayText: getLineDisplayText(line.text),
+      hasText: Boolean(line.text)
+    }));
+    if (!maxLines || indexed.length <= maxLines)
+      return indexed;
+    if (activeLineIndex < 0)
+      return indexed.slice(0, maxLines);
+    const start = Math.max(0, Math.min(activeLineIndex - Math.floor(maxLines / 2), indexed.length - maxLines));
+    return indexed.slice(start, start + maxLines);
   }
   return {
-    root,
-    update,
-    updatePlayback,
-    setLoading,
-    clear,
-    destroy() {
-      stopTicking();
-      stopAutoScrollTracking();
-      stopLoadingState();
-      root.remove();
+    clear() {
+      lyrics = [];
+      playback = null;
+      activeLineIndex = -1;
+    },
+    setLyrics(nextLyrics) {
+      lyrics = nextLyrics;
+      activeLineIndex = -1;
+      refreshActiveLineIndex();
+    },
+    setPlayback(nextPlayback) {
+      playback = nextPlayback;
+    },
+    refreshActiveLineIndex,
+    getActiveLineIndex() {
+      return activeLineIndex;
+    },
+    hasLyrics() {
+      return lyrics.length > 0;
+    },
+    getSnapshot() {
+      refreshActiveLineIndex();
+      return {
+        activeLineIndex,
+        lines: getVisibleLines()
+      };
     }
   };
 }
@@ -3306,7 +3128,6 @@ var ICON_VOLUME3 = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5
 var ICON_EXPAND2 = `<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>`;
 var ICON_COLLAPSE2 = `<svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>`;
 var ICON_NOTE = `<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
-var EMPTY_SYNCED_LINE_SYMBOL3 = "♪";
 function formatTime3(ms) {
   const totalSec = Math.floor(ms / 1000);
   const min = Math.floor(totalSec / 60);
@@ -3462,11 +3283,10 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   let lastIsPlaying = false;
   let animFrameId = null;
   let lyricsTrackUri = null;
-  let syncedLyrics = [];
+  const syncedLyricsModel = createSyncedLyricsModel(5);
   let plainLyricLines = [];
   let lyricsInstrumental = false;
   let lyricsLoading = false;
-  let activeLyricLineIndex = -1;
   let volumeDebounce = null;
   let lastRenderedLyricSignature = "";
   function renderCompactArt(trackArtUrl) {
@@ -3481,15 +3301,6 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     if (!lastIsPlaying)
       return lastProgressMs;
     return Math.min(lastProgressMs + Math.max(0, Date.now() - lastUpdateTime), currentDuration || Infinity);
-  }
-  function getLyricWindow() {
-    if (syncedLyrics.length === 0)
-      return [];
-    if (activeLyricLineIndex < 0) {
-      return syncedLyrics.slice(0, 5).map((line, index) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL3, index }));
-    }
-    const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - 5));
-    return syncedLyrics.slice(start, start + 5).map((line, offset) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL3, index: start + offset }));
   }
   function renderLyrics() {
     lyricsBody.innerHTML = "";
@@ -3517,16 +3328,16 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       lyricsBody.appendChild(status2);
       return;
     }
-    if (syncedLyrics.length > 0 && state.trackUri === lyricsTrackUri) {
-      const lyricWindow = getLyricWindow();
-      const nextSignature = lyricWindow.map((line) => `${line.index}:${line.text}`).join("|");
+    if (syncedLyricsModel.hasLyrics() && state.trackUri === lyricsTrackUri) {
+      const snapshot = syncedLyricsModel.getSnapshot();
+      const nextSignature = snapshot.lines.map((line) => `${line.index}:${line.text}`).join("|");
       const shouldAnimate = nextSignature !== lastRenderedLyricSignature;
       lastRenderedLyricSignature = nextSignature;
-      lyricWindow.forEach((line, renderIndex) => {
+      snapshot.lines.forEach((line, renderIndex) => {
         const el = document.createElement("div");
-        const distance = activeLyricLineIndex < 0 ? line.index : Math.abs(line.index - activeLyricLineIndex);
+        const distance = snapshot.activeLineIndex < 0 ? line.index : Math.abs(line.index - snapshot.activeLineIndex);
         el.className = "spotify-modern-widget-lyric-line";
-        if (line.index === activeLyricLineIndex)
+        if (line.index === snapshot.activeLineIndex)
           el.classList.add("active");
         else if (distance === 1)
           el.classList.add("near");
@@ -3566,20 +3377,19 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     lyricsBody.appendChild(status);
   }
   function updateActiveLyricLine(force = false) {
-    if (!state || state.trackUri !== lyricsTrackUri || syncedLyrics.length === 0) {
+    if (!state || state.trackUri !== lyricsTrackUri || !syncedLyricsModel.hasLyrics()) {
       if (force)
         renderLyrics();
       return;
     }
-    const progressMs = getInterpolatedProgressMs();
-    let nextActiveLineIndex = -1;
-    for (let i = 0;i < syncedLyrics.length; i++) {
-      if (syncedLyrics[i].timeMs > progressMs)
-        break;
-      nextActiveLineIndex = i;
-    }
-    if (force || nextActiveLineIndex !== activeLyricLineIndex) {
-      activeLyricLineIndex = nextActiveLineIndex;
+    syncedLyricsModel.setPlayback({
+      trackUri: state.trackUri,
+      progressMs: getInterpolatedProgressMs(),
+      durationMs: currentDuration,
+      isPlaying: lastIsPlaying,
+      updatedAt: Date.now()
+    });
+    if (force || syncedLyricsModel.refreshActiveLineIndex()) {
       renderLyrics();
     }
   }
@@ -3638,6 +3448,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       compactProgressFill.style.width = "0%";
       renderCompactArt(null);
       renderHeroArt(null);
+      syncedLyricsModel.setPlayback(null);
       stopTicking();
       renderLyrics();
       return;
@@ -3659,6 +3470,13 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     lastProgressMs = playbackState.progressMs;
     lastUpdateTime = Date.now();
     lastIsPlaying = playbackState.isPlaying;
+    syncedLyricsModel.setPlayback({
+      trackUri: playbackState.trackUri,
+      progressMs: playbackState.progressMs,
+      durationMs: playbackState.durationMs,
+      isPlaying: playbackState.isPlaying,
+      updatedAt: lastUpdateTime
+    });
     playPauseBtn.innerHTML = playbackState.isPlaying ? ICON_PAUSE3 : ICON_PLAY3;
     volumeSlider.value = String(playbackState.volume ?? Number(volumeSlider.value));
     const pct = playbackState.durationMs > 0 ? playbackState.progressMs / playbackState.durationMs * 100 : 0;
@@ -3674,21 +3492,19 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   }
   function updateLyrics(trackUri, plainLyrics, syncedLyricsText, instrumental) {
     lyricsTrackUri = trackUri;
-    syncedLyrics = parseSyncedLyrics(syncedLyricsText);
+    syncedLyricsModel.setLyrics(parseSyncedLyrics(syncedLyricsText));
     plainLyricLines = getCompactPlainLyricLines2(plainLyrics);
     lyricsInstrumental = instrumental;
     lyricsLoading = false;
-    activeLyricLineIndex = -1;
     updateActiveLyricLine(true);
   }
   function setLyricsLoading(loading) {
     lyricsLoading = loading;
     if (loading) {
       lyricsTrackUri = state?.trackUri ?? null;
-      syncedLyrics = [];
+      syncedLyricsModel.clear();
       plainLyricLines = [];
       lyricsInstrumental = false;
-      activeLyricLineIndex = -1;
     }
     renderLyrics();
   }
@@ -3713,6 +3529,289 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
         clearTimeout(volumeDebounce);
       compactArt.destroy();
       heroArt.destroy();
+      root.remove();
+    }
+  };
+}
+
+// src/ui/lyrics.ts
+var USER_SCROLL_SUPPRESS_MS = 2500;
+var LOADING_STATUS_DELAY_MS = 180;
+var SEEK_SYNC_TOLERANCE_MS = 1400;
+var SEEK_STATE_GRACE_MS = 1800;
+function getLineClassName(index, activeLineIndex, hasText) {
+  const classes = ["spotify-lyrics-line"];
+  if (!hasText)
+    classes.push("spotify-lyrics-line-blank");
+  if (index === activeLineIndex)
+    classes.push("spotify-lyrics-line-active");
+  else if (index < activeLineIndex)
+    classes.push("spotify-lyrics-line-past");
+  else
+    classes.push("spotify-lyrics-line-future");
+  if (activeLineIndex >= 0) {
+    const distance = Math.abs(index - activeLineIndex);
+    if (distance === 1)
+      classes.push("spotify-lyrics-line-tier-1");
+    else if (distance === 2)
+      classes.push("spotify-lyrics-line-tier-2");
+    else if (distance === 3)
+      classes.push("spotify-lyrics-line-tier-3");
+    else if (distance >= 4)
+      classes.push("spotify-lyrics-line-tier-4");
+  }
+  return classes.join(" ");
+}
+function createLyricsUI(onSeek) {
+  const root = document.createElement("div");
+  root.className = "spotify-section spotify-lyrics-section";
+  const title = document.createElement("h3");
+  title.className = "spotify-section-title";
+  title.textContent = "Lyrics";
+  root.appendChild(title);
+  const body = document.createElement("div");
+  body.className = "spotify-lyrics-body";
+  root.appendChild(body);
+  let currentTrackUri = null;
+  let syncedLines = [];
+  const syncedLyricsModel = createSyncedLyricsModel();
+  let playback = null;
+  let activeLineIndex = -1;
+  let tickTimer = null;
+  let autoScrollTimer = null;
+  let loadingTimer = null;
+  let isAutoScrolling = false;
+  let lastUserScrollAt = 0;
+  let pendingSeekPositionMs = null;
+  let pendingSeekUntil = 0;
+  function stopLoadingState() {
+    if (loadingTimer) {
+      clearTimeout(loadingTimer);
+      loadingTimer = null;
+    }
+    body.classList.remove("spotify-lyrics-loading");
+  }
+  function stopAutoScrollTracking() {
+    if (autoScrollTimer) {
+      clearTimeout(autoScrollTimer);
+      autoScrollTimer = null;
+    }
+    isAutoScrolling = false;
+  }
+  function noteUserScroll() {
+    stopAutoScrollTracking();
+    lastUserScrollAt = Date.now();
+  }
+  body.addEventListener("wheel", noteUserScroll, { passive: true });
+  body.addEventListener("touchmove", noteUserScroll, { passive: true });
+  body.addEventListener("pointerdown", noteUserScroll, { passive: true });
+  body.addEventListener("scroll", () => {
+    if (!isAutoScrolling)
+      lastUserScrollAt = Date.now();
+  }, { passive: true });
+  function stopTicking() {
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+  }
+  function startTicking() {
+    if (tickTimer || syncedLines.length === 0)
+      return;
+    tickTimer = setInterval(updateActiveLine, 200);
+  }
+  function centerLine(line, behavior = "smooth") {
+    requestAnimationFrame(() => {
+      const bodyRect = body.getBoundingClientRect();
+      const textRect = line.textEl.getBoundingClientRect();
+      const targetScrollTop = body.scrollTop + (textRect.top + textRect.height / 2) - (bodyRect.top + body.clientHeight / 2);
+      const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+      body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior });
+    });
+  }
+  function updateLineClasses(nextActiveLineIndex, options = {}) {
+    activeLineIndex = nextActiveLineIndex;
+    syncedLines.forEach((line, index) => {
+      line.el.className = getLineClassName(line.index, activeLineIndex, Boolean(line.text));
+    });
+    const activeLine = syncedLines.find((line) => line.index === activeLineIndex);
+    const shouldCenter = options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
+    if (activeLine && shouldCenter) {
+      isAutoScrolling = true;
+      if (autoScrollTimer)
+        clearTimeout(autoScrollTimer);
+      centerLine(activeLine, options.behavior);
+      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
+    }
+  }
+  function updateActiveLine() {
+    if (syncedLines.length === 0)
+      return;
+    if (syncedLyricsModel.refreshActiveLineIndex()) {
+      updateLineClasses(syncedLyricsModel.getActiveLineIndex());
+    }
+  }
+  function clear() {
+    stopTicking();
+    stopAutoScrollTracking();
+    stopLoadingState();
+    body.innerHTML = "";
+    body.className = "spotify-lyrics-body";
+    currentTrackUri = null;
+    syncedLines = [];
+    syncedLyricsModel.clear();
+    playback = null;
+    activeLineIndex = -1;
+    pendingSeekPositionMs = null;
+    pendingSeekUntil = 0;
+  }
+  function setLoading(loading) {
+    stopLoadingState();
+    if (!loading)
+      return;
+    if (loading) {
+      stopTicking();
+      stopAutoScrollTracking();
+      body.innerHTML = "";
+      body.className = "spotify-lyrics-body spotify-lyrics-loading";
+      syncedLines = [];
+      syncedLyricsModel.clear();
+      activeLineIndex = -1;
+      loadingTimer = setTimeout(() => {
+        loadingTimer = null;
+        if (!body.classList.contains("spotify-lyrics-loading"))
+          return;
+        const el = document.createElement("div");
+        el.className = "spotify-lyrics-status spotify-lyrics-status-loading";
+        el.textContent = "Loading lyrics...";
+        body.appendChild(el);
+      }, LOADING_STATUS_DELAY_MS);
+    }
+  }
+  function renderSyncedLyrics(lines) {
+    stopLoadingState();
+    body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
+    syncedLyricsModel.setLyrics(lines);
+    const snapshot = syncedLyricsModel.getSnapshot();
+    activeLineIndex = snapshot.activeLineIndex;
+    syncedLines = snapshot.lines.map((line, renderIndex) => {
+      const el = document.createElement("div");
+      const textEl = document.createElement("div");
+      el.className = getLineClassName(line.index, activeLineIndex, line.hasText);
+      el.classList.add("spotify-lyrics-line-enter");
+      el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(renderIndex * 28, 280)}ms`);
+      textEl.className = "spotify-lyrics-line-text";
+      if (!line.hasText)
+        textEl.classList.add("spotify-lyrics-line-symbol");
+      if (shouldReserveScaleGutter(line.text))
+        textEl.classList.add("spotify-lyrics-line-text-long");
+      textEl.textContent = line.displayText;
+      el.appendChild(textEl);
+      el.addEventListener("click", () => {
+        pendingSeekPositionMs = line.timeMs;
+        pendingSeekUntil = Date.now() + SEEK_STATE_GRACE_MS;
+        if (playback && playback.trackUri === currentTrackUri) {
+          playback = {
+            ...playback,
+            progressMs: line.timeMs,
+            updatedAt: Date.now()
+          };
+          syncedLyricsModel.setPlayback(playback);
+        }
+        updateLineClasses(line.index, { forceCenter: true, behavior: "smooth" });
+        onSeek?.(line.timeMs);
+      });
+      body.appendChild(el);
+      return { index: line.index, timeMs: line.timeMs, text: line.text, el, textEl };
+    });
+    updateActiveLine();
+    if (playback?.isPlaying)
+      startTicking();
+  }
+  function renderPlainLyrics(lyrics) {
+    stopLoadingState();
+    body.className = "spotify-lyrics-body spotify-lyrics-has-content";
+    const pre = document.createElement("div");
+    pre.className = "spotify-lyrics-text spotify-lyrics-text-enter";
+    pre.textContent = lyrics;
+    body.appendChild(pre);
+  }
+  function update(trackUri, plainLyrics, syncedLyrics, instrumental) {
+    stopTicking();
+    stopAutoScrollTracking();
+    stopLoadingState();
+    currentTrackUri = trackUri;
+    body.innerHTML = "";
+    syncedLines = [];
+    activeLineIndex = -1;
+    if (instrumental) {
+      body.className = "spotify-lyrics-body";
+      const el = document.createElement("div");
+      el.className = "spotify-lyrics-status";
+      el.textContent = "♪ Instrumental";
+      body.appendChild(el);
+      return;
+    }
+    const parsedSyncedLyrics = parseSyncedLyrics(syncedLyrics);
+    if (parsedSyncedLyrics.length > 0) {
+      renderSyncedLyrics(parsedSyncedLyrics);
+      return;
+    }
+    if (!plainLyrics) {
+      body.className = "spotify-lyrics-body";
+      const el = document.createElement("div");
+      el.className = "spotify-lyrics-status";
+      el.textContent = "No lyrics available";
+      body.appendChild(el);
+      return;
+    }
+    renderPlainLyrics(plainLyrics);
+  }
+  function updatePlayback(state) {
+    if (!state || state.trackUri !== currentTrackUri) {
+      playback = null;
+      syncedLyricsModel.setPlayback(null);
+      pendingSeekPositionMs = null;
+      pendingSeekUntil = 0;
+      stopTicking();
+      return;
+    }
+    if (pendingSeekPositionMs !== null) {
+      const isNearPendingSeek = Math.abs(state.progressMs - pendingSeekPositionMs) <= SEEK_SYNC_TOLERANCE_MS;
+      if (isNearPendingSeek) {
+        pendingSeekPositionMs = null;
+        pendingSeekUntil = 0;
+      } else if (Date.now() < pendingSeekUntil) {
+        return;
+      } else {
+        pendingSeekPositionMs = null;
+        pendingSeekUntil = 0;
+      }
+    }
+    playback = {
+      trackUri: state.trackUri,
+      progressMs: state.progressMs,
+      durationMs: state.durationMs,
+      isPlaying: state.isPlaying,
+      updatedAt: Date.now()
+    };
+    syncedLyricsModel.setPlayback(playback);
+    updateActiveLine();
+    if (state.isPlaying)
+      startTicking();
+    else
+      stopTicking();
+  }
+  return {
+    root,
+    update,
+    updatePlayback,
+    setLoading,
+    clear,
+    destroy() {
+      stopTicking();
+      stopAutoScrollTracking();
+      stopLoadingState();
       root.remove();
     }
   };
@@ -4003,6 +4102,8 @@ function setup(ctx) {
   }
   function applyWidgetStyle() {
     widget.root.style.touchAction = "none";
+    widget.root.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1)";
+    widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     modernWidget.setCollapsedSize(currentWidgetSize);
     if (currentMiniPlayerStyle === "modern") {
       const size = modernWidgetExpanded ? getModernExpandedSize() : { width: currentWidgetSize, height: currentWidgetSize };

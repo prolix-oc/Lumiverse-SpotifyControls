@@ -1,4 +1,11 @@
 import type { PlaybackState } from "../types";
+import {
+  createSyncedLyricsModel,
+  parseSyncedLyrics,
+  getLineDisplayText,
+  shouldReserveScaleGutter,
+  type ParsedSyncedLyricLine,
+} from "./synced-lyrics-model";
 
 export interface LyricsUI {
   root: HTMLElement;
@@ -10,6 +17,7 @@ export interface LyricsUI {
 }
 
 interface SyncedLyricLine {
+  index: number;
   timeMs: number;
   text: string;
   el: HTMLDivElement;
@@ -26,57 +34,12 @@ interface LyricsPlayback {
 
 const USER_SCROLL_SUPPRESS_MS = 2500;
 const LOADING_STATUS_DELAY_MS = 180;
-const EMPTY_SYNCED_LINE_SYMBOL = "♪";
 const SEEK_SYNC_TOLERANCE_MS = 1400;
 const SEEK_STATE_GRACE_MS = 1800;
 
 interface UpdateLineClassesOptions {
   forceCenter?: boolean;
   behavior?: ScrollBehavior;
-}
-
-export interface ParsedSyncedLyricLine {
-  timeMs: number;
-  text: string;
-}
-
-function parseTimestamp(raw: string): number | null {
-  const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
-  if (!match) return null;
-
-  const minutes = Number(match[1]);
-  const seconds = Number(match[2]);
-  const fraction = match[3] ? Number(match[3].padEnd(3, "0")) : 0;
-  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) return null;
-
-  return minutes * 60_000 + seconds * 1000 + fraction;
-}
-
-export function parseSyncedLyrics(value: string | null): ParsedSyncedLyricLine[] {
-  if (!value) return [];
-
-  const parsed: ParsedSyncedLyricLine[] = [];
-  for (const line of value.split(/\r?\n/)) {
-    const timestamps = [...line.matchAll(/\[([^\]]+)\]/g)]
-      .map((match) => parseTimestamp(match[1]))
-      .filter((timeMs): timeMs is number => timeMs !== null);
-    if (timestamps.length === 0) continue;
-
-    const text = line.replace(/(?:\[[^\]]+\])+/g, "").trim();
-    for (const timeMs of timestamps) parsed.push({ timeMs, text });
-  }
-
-  const grouped: ParsedSyncedLyricLine[] = [];
-  for (const line of parsed.sort((a, b) => a.timeMs - b.timeMs)) {
-    const previous = grouped[grouped.length - 1];
-    if (previous?.timeMs === line.timeMs) {
-      previous.text = [previous.text, line.text].filter(Boolean).join("\n");
-    } else {
-      grouped.push({ ...line });
-    }
-  }
-
-  return grouped;
 }
 
 function getLineClassName(index: number, activeLineIndex: number, hasText: boolean): string {
@@ -95,14 +58,6 @@ function getLineClassName(index: number, activeLineIndex: number, hasText: boole
   return classes.join(" ");
 }
 
-function getLineDisplayText(text: string): string {
-  return text || EMPTY_SYNCED_LINE_SYMBOL;
-}
-
-function shouldReserveScaleGutter(text: string): boolean {
-  return !text.includes("\n") && text.length >= 36;
-}
-
 export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI {
   const root = document.createElement("div");
   root.className = "spotify-section spotify-lyrics-section";
@@ -118,6 +73,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
 
   let currentTrackUri: string | null = null;
   let syncedLines: SyncedLyricLine[] = [];
+  const syncedLyricsModel = createSyncedLyricsModel();
   let playback: LyricsPlayback | null = null;
   let activeLineIndex = -1;
   let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -168,12 +124,6 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     tickTimer = setInterval(updateActiveLine, 200);
   }
 
-  function getProgressMs(): number {
-    if (!playback) return 0;
-    if (!playback.isPlaying) return playback.progressMs;
-    return Math.min(playback.progressMs + Date.now() - playback.updatedAt, playback.durationMs || Infinity);
-  }
-
   function centerLine(line: SyncedLyricLine, behavior: ScrollBehavior = "smooth") {
     requestAnimationFrame(() => {
       const bodyRect = body.getBoundingClientRect();
@@ -187,10 +137,10 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function updateLineClasses(nextActiveLineIndex: number, options: UpdateLineClassesOptions = {}) {
     activeLineIndex = nextActiveLineIndex;
     syncedLines.forEach((line, index) => {
-      line.el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
+      line.el.className = getLineClassName(line.index, activeLineIndex, Boolean(line.text));
     });
 
-    const activeLine = syncedLines[activeLineIndex];
+    const activeLine = syncedLines.find((line) => line.index === activeLineIndex);
     const shouldCenter = options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
     if (activeLine && shouldCenter) {
       isAutoScrolling = true;
@@ -203,15 +153,8 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function updateActiveLine() {
     if (syncedLines.length === 0) return;
 
-    const progressMs = getProgressMs();
-    let nextActiveLineIndex = -1;
-    for (let i = 0; i < syncedLines.length; i++) {
-      if (syncedLines[i].timeMs > progressMs) break;
-      nextActiveLineIndex = i;
-    }
-
-    if (nextActiveLineIndex !== activeLineIndex) {
-      updateLineClasses(nextActiveLineIndex);
+    if (syncedLyricsModel.refreshActiveLineIndex()) {
+      updateLineClasses(syncedLyricsModel.getActiveLineIndex());
     }
   }
 
@@ -223,6 +166,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     body.className = "spotify-lyrics-body";
     currentTrackUri = null;
     syncedLines = [];
+    syncedLyricsModel.clear();
     playback = null;
     activeLineIndex = -1;
     pendingSeekPositionMs = null;
@@ -239,6 +183,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
       body.innerHTML = "";
       body.className = "spotify-lyrics-body spotify-lyrics-loading";
       syncedLines = [];
+      syncedLyricsModel.clear();
       activeLineIndex = -1;
       loadingTimer = setTimeout(() => {
         loadingTimer = null;
@@ -254,16 +199,19 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function renderSyncedLyrics(lines: Array<{ timeMs: number; text: string }>) {
     stopLoadingState();
     body.className = "spotify-lyrics-body spotify-lyrics-has-content spotify-lyrics-synced";
-    syncedLines = lines.map((line, index) => {
+    syncedLyricsModel.setLyrics(lines);
+    const snapshot = syncedLyricsModel.getSnapshot();
+    activeLineIndex = snapshot.activeLineIndex;
+    syncedLines = snapshot.lines.map((line, renderIndex) => {
       const el = document.createElement("div");
       const textEl = document.createElement("div");
-      el.className = getLineClassName(index, activeLineIndex, Boolean(line.text));
+      el.className = getLineClassName(line.index, activeLineIndex, line.hasText);
       el.classList.add("spotify-lyrics-line-enter");
-      el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(index * 28, 280)}ms`);
+      el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(renderIndex * 28, 280)}ms`);
       textEl.className = "spotify-lyrics-line-text";
-      if (!line.text) textEl.classList.add("spotify-lyrics-line-symbol");
+      if (!line.hasText) textEl.classList.add("spotify-lyrics-line-symbol");
       if (shouldReserveScaleGutter(line.text)) textEl.classList.add("spotify-lyrics-line-text-long");
-      textEl.textContent = getLineDisplayText(line.text);
+      textEl.textContent = line.displayText;
       el.appendChild(textEl);
       el.addEventListener("click", () => {
         pendingSeekPositionMs = line.timeMs;
@@ -274,12 +222,13 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
             progressMs: line.timeMs,
             updatedAt: Date.now(),
           };
+          syncedLyricsModel.setPlayback(playback);
         }
-        updateLineClasses(index, { forceCenter: true, behavior: "smooth" });
+        updateLineClasses(line.index, { forceCenter: true, behavior: "smooth" });
         onSeek?.(line.timeMs);
       });
       body.appendChild(el);
-      return { ...line, el, textEl };
+      return { index: line.index, timeMs: line.timeMs, text: line.text, el, textEl };
     });
     updateActiveLine();
     if (playback?.isPlaying) startTicking();
@@ -333,6 +282,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   function updatePlayback(state: PlaybackState | null) {
     if (!state || state.trackUri !== currentTrackUri) {
       playback = null;
+      syncedLyricsModel.setPlayback(null);
       pendingSeekPositionMs = null;
       pendingSeekUntil = 0;
       stopTicking();
@@ -359,6 +309,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
       isPlaying: state.isPlaying,
       updatedAt: Date.now(),
     };
+    syncedLyricsModel.setPlayback(playback);
     updateActiveLine();
 
     if (state.isPlaying) startTicking();

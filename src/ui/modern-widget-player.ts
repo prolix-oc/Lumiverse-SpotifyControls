@@ -1,6 +1,6 @@
 import type { PlaybackState } from "../types";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
-import { parseSyncedLyrics } from "./lyrics";
+import { createSyncedLyricsModel, parseSyncedLyrics } from "./synced-lyrics-model";
 
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
@@ -219,11 +219,10 @@ export function createModernWidgetPlayerUI(
   let lastIsPlaying = false;
   let animFrameId: number | null = null;
   let lyricsTrackUri: string | null = null;
-  let syncedLyrics: Array<{ timeMs: number; text: string }> = [];
+  const syncedLyricsModel = createSyncedLyricsModel(5);
   let plainLyricLines: string[] = [];
   let lyricsInstrumental = false;
   let lyricsLoading = false;
-  let activeLyricLineIndex = -1;
   let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
   let lastRenderedLyricSignature = "";
 
@@ -240,15 +239,6 @@ export function createModernWidgetPlayerUI(
   function getInterpolatedProgressMs(): number {
     if (!lastIsPlaying) return lastProgressMs;
     return Math.min(lastProgressMs + Math.max(0, Date.now() - lastUpdateTime), currentDuration || Infinity);
-  }
-
-  function getLyricWindow() {
-    if (syncedLyrics.length === 0) return [] as Array<{ text: string; index: number }>;
-    if (activeLyricLineIndex < 0) {
-      return syncedLyrics.slice(0, 5).map((line, index) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index }));
-    }
-    const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - 5));
-    return syncedLyrics.slice(start, start + 5).map((line, offset) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index: start + offset }));
   }
 
   function renderLyrics() {
@@ -281,17 +271,17 @@ export function createModernWidgetPlayerUI(
       return;
     }
 
-    if (syncedLyrics.length > 0 && state.trackUri === lyricsTrackUri) {
-      const lyricWindow = getLyricWindow();
-      const nextSignature = lyricWindow.map((line) => `${line.index}:${line.text}`).join("|");
+    if (syncedLyricsModel.hasLyrics() && state.trackUri === lyricsTrackUri) {
+      const snapshot = syncedLyricsModel.getSnapshot();
+      const nextSignature = snapshot.lines.map((line) => `${line.index}:${line.text}`).join("|");
       const shouldAnimate = nextSignature !== lastRenderedLyricSignature;
       lastRenderedLyricSignature = nextSignature;
 
-      lyricWindow.forEach((line, renderIndex) => {
+      snapshot.lines.forEach((line, renderIndex) => {
         const el = document.createElement("div");
-        const distance = activeLyricLineIndex < 0 ? line.index : Math.abs(line.index - activeLyricLineIndex);
+        const distance = snapshot.activeLineIndex < 0 ? line.index : Math.abs(line.index - snapshot.activeLineIndex);
         el.className = "spotify-modern-widget-lyric-line";
-        if (line.index === activeLyricLineIndex) el.classList.add("active");
+        if (line.index === snapshot.activeLineIndex) el.classList.add("active");
         else if (distance === 1) el.classList.add("near");
         else if (distance === 2) el.classList.add("mid");
         else el.classList.add("far");
@@ -332,20 +322,20 @@ export function createModernWidgetPlayerUI(
   }
 
   function updateActiveLyricLine(force = false) {
-    if (!state || state.trackUri !== lyricsTrackUri || syncedLyrics.length === 0) {
+    if (!state || state.trackUri !== lyricsTrackUri || !syncedLyricsModel.hasLyrics()) {
       if (force) renderLyrics();
       return;
     }
 
-    const progressMs = getInterpolatedProgressMs();
-    let nextActiveLineIndex = -1;
-    for (let i = 0; i < syncedLyrics.length; i++) {
-      if (syncedLyrics[i].timeMs > progressMs) break;
-      nextActiveLineIndex = i;
-    }
+    syncedLyricsModel.setPlayback({
+      trackUri: state.trackUri,
+      progressMs: getInterpolatedProgressMs(),
+      durationMs: currentDuration,
+      isPlaying: lastIsPlaying,
+      updatedAt: Date.now(),
+    });
 
-    if (force || nextActiveLineIndex !== activeLyricLineIndex) {
-      activeLyricLineIndex = nextActiveLineIndex;
+    if (force || syncedLyricsModel.refreshActiveLineIndex()) {
       renderLyrics();
     }
   }
@@ -410,6 +400,7 @@ export function createModernWidgetPlayerUI(
       compactProgressFill.style.width = "0%";
       renderCompactArt(null);
       renderHeroArt(null);
+      syncedLyricsModel.setPlayback(null);
       stopTicking();
       renderLyrics();
       return;
@@ -434,6 +425,13 @@ export function createModernWidgetPlayerUI(
     lastProgressMs = playbackState.progressMs;
     lastUpdateTime = Date.now();
     lastIsPlaying = playbackState.isPlaying;
+    syncedLyricsModel.setPlayback({
+      trackUri: playbackState.trackUri,
+      progressMs: playbackState.progressMs,
+      durationMs: playbackState.durationMs,
+      isPlaying: playbackState.isPlaying,
+      updatedAt: lastUpdateTime,
+    });
     playPauseBtn.innerHTML = playbackState.isPlaying ? ICON_PAUSE : ICON_PLAY;
     volumeSlider.value = String(playbackState.volume ?? Number(volumeSlider.value));
 
@@ -450,11 +448,10 @@ export function createModernWidgetPlayerUI(
 
   function updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyricsText: string | null, instrumental: boolean) {
     lyricsTrackUri = trackUri;
-    syncedLyrics = parseSyncedLyrics(syncedLyricsText);
+    syncedLyricsModel.setLyrics(parseSyncedLyrics(syncedLyricsText));
     plainLyricLines = getCompactPlainLyricLines(plainLyrics);
     lyricsInstrumental = instrumental;
     lyricsLoading = false;
-    activeLyricLineIndex = -1;
     updateActiveLyricLine(true);
   }
 
@@ -462,10 +459,9 @@ export function createModernWidgetPlayerUI(
     lyricsLoading = loading;
     if (loading) {
       lyricsTrackUri = state?.trackUri ?? null;
-      syncedLyrics = [];
+      syncedLyricsModel.clear();
       plainLyricLines = [];
       lyricsInstrumental = false;
-      activeLyricLineIndex = -1;
     }
     renderLyrics();
   }

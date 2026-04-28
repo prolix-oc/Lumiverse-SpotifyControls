@@ -1,6 +1,6 @@
 import type { PlaybackState, DeviceInfo, MiniPlayerStyle } from "../types";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
-import { parseSyncedLyrics } from "./lyrics";
+import { parseSyncedLyrics } from "./synced-lyrics-model";
 
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;

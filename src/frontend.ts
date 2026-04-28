@@ -353,6 +353,8 @@ export function setup(ctx: SpindleFrontendContext) {
 
   function applyWidgetStyle() {
     widget.root.style.touchAction = "none";
+    widget.root.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1)";
+    widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     modernWidget.setCollapsedSize(currentWidgetSize);
 
     if (currentMiniPlayerStyle === "modern") {
