@@ -6,6 +6,8 @@ import {
   shouldReserveScaleGutter,
 } from "./synced-lyrics-model";
 
+const USER_SCROLL_SUPPRESS_MS = 2500;
+
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
 const ICON_PAUSE = `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
@@ -270,6 +272,9 @@ export function createModernWidgetPlayerUI(
   let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
   let lastRenderedLyricSignature = "";
   let syncedLyricEls: HTMLDivElement[] = [];
+  let autoScrollTimer: ReturnType<typeof setTimeout> | null = null;
+  let isAutoScrolling = false;
+  let lastUserScrollAt = 0;
   let lastMetadataSignature = "";
   let marqueeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let marqueeRefreshTimerLate: ReturnType<typeof setTimeout> | null = null;
@@ -279,6 +284,26 @@ export function createModernWidgetPlayerUI(
   });
   marqueeObserver.observe(meta);
   marqueeObserver.observe(root);
+
+  function stopAutoScrollTracking() {
+    if (autoScrollTimer) {
+      clearTimeout(autoScrollTimer);
+      autoScrollTimer = null;
+    }
+    isAutoScrolling = false;
+  }
+
+  function noteUserScroll() {
+    stopAutoScrollTracking();
+    lastUserScrollAt = Date.now();
+  }
+
+  lyricsBody.addEventListener("wheel", noteUserScroll, { passive: true });
+  lyricsBody.addEventListener("touchmove", noteUserScroll, { passive: true });
+  lyricsBody.addEventListener("pointerdown", noteUserScroll, { passive: true });
+  lyricsBody.addEventListener("scroll", () => {
+    if (!isAutoScrolling) lastUserScrollAt = Date.now();
+  }, { passive: true });
 
   function refreshMarquees(restart: boolean) {
     requestAnimationFrame(() => {
@@ -312,8 +337,9 @@ export function createModernWidgetPlayerUI(
   }
 
   function clearLyricsTrack() {
+    stopAutoScrollTracking();
     lyricsTrack.innerHTML = "";
-    lyricsTrack.style.transform = "translateY(0px)";
+    lyricsBody.scrollTop = 0;
     syncedLyricEls = [];
   }
 
@@ -333,7 +359,7 @@ export function createModernWidgetPlayerUI(
     });
   }
 
-  function updateSyncedLyricsPresentation() {
+  function updateSyncedLyricsPresentation(shouldAutoscroll = true) {
     const activeLineIndex = syncedLyricsModel.getActiveLineIndex();
     const indexedLines = syncedLyricsModel.getIndexedLines();
     indexedLines.forEach((line, idx) => {
@@ -351,16 +377,21 @@ export function createModernWidgetPlayerUI(
     });
 
     const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];
-    if (!activeEl) {
-      lyricsTrack.style.transform = "translateY(0px)";
-      return;
-    }
+    if (!activeEl || !shouldAutoscroll) return;
+
+    const shouldCenter = Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
+    if (!shouldCenter) return;
 
     requestAnimationFrame(() => {
-      const targetOffset = activeEl.offsetTop + activeEl.offsetHeight / 2 - lyricsBody.clientHeight / 2;
-      const maxOffset = Math.max(0, lyricsTrack.scrollHeight - lyricsBody.clientHeight);
-      const clampedOffset = Math.max(0, Math.min(targetOffset, maxOffset));
-      lyricsTrack.style.transform = `translateY(${-clampedOffset}px)`;
+      const targetScrollTop = activeEl.offsetTop + activeEl.offsetHeight / 2 - lyricsBody.clientHeight / 2;
+      const maxScrollTop = Math.max(0, lyricsBody.scrollHeight - lyricsBody.clientHeight);
+      isAutoScrolling = true;
+      lyricsBody.scrollTo({
+        top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)),
+        behavior: "smooth",
+      });
+      if (autoScrollTimer) clearTimeout(autoScrollTimer);
+      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
     });
   }
 
@@ -398,7 +429,7 @@ export function createModernWidgetPlayerUI(
       const nextSignature = syncedLyricsModel.getIndexedLines().map((line) => `${line.index}:${line.text}`).join("|");
       lastRenderedLyricSignature = nextSignature;
       buildSyncedLyricsTrack();
-      updateSyncedLyricsPresentation();
+      updateSyncedLyricsPresentation(false);
       return;
     }
 
@@ -448,7 +479,7 @@ export function createModernWidgetPlayerUI(
     }
 
     if (syncedLyricsModel.refreshActiveLineIndex()) {
-      updateSyncedLyricsPresentation();
+      updateSyncedLyricsPresentation(true);
     }
   }
 
@@ -606,6 +637,7 @@ export function createModernWidgetPlayerUI(
     },
     destroy() {
       stopTicking();
+      stopAutoScrollTracking();
       if (volumeDebounce) clearTimeout(volumeDebounce);
       if (marqueeRefreshTimer) clearTimeout(marqueeRefreshTimer);
       if (marqueeRefreshTimerLate) clearTimeout(marqueeRefreshTimerLate);

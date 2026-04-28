@@ -514,7 +514,8 @@ export const PANEL_CSS = `
     linear-gradient(180deg, rgba(19, 19, 22, 0.96) 0%, rgba(10, 10, 13, 0.98) 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(24px) saturate(1.15);
+  -webkit-backdrop-filter: var(--lcs-glass-blur, blur(24px));
+  backdrop-filter: var(--lcs-glass-blur, blur(24px));
   color: #fff;
   transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, background 320ms ease;
 }
@@ -841,11 +842,14 @@ export const PANEL_CSS = `
 .spotify-modern-widget-lyrics-body {
   min-height: 132px;
   max-height: 176px;
-  display: grid;
-  align-content: center;
+  display: block;
   gap: 4px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lumiverse-fill-strong) transparent;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
 }
@@ -853,10 +857,8 @@ export const PANEL_CSS = `
 .spotify-modern-widget-lyrics-track {
   width: 100%;
   display: grid;
-  align-content: center;
   gap: 4px;
-  will-change: transform;
-  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  padding: 4px 0 10px;
 }
 
 .spotify-modern-widget-lyrics-status {
