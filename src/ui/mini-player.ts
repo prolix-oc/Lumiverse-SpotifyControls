@@ -1,5 +1,6 @@
-import type { PlaybackState, DeviceInfo } from "../types";
+import type { PlaybackState, DeviceInfo, MiniPlayerStyle } from "../types";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
+import { parseSyncedLyrics } from "./lyrics";
 
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
@@ -9,6 +10,7 @@ const ICON_VOLUME = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.
 const ICON_EXPAND = `<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>`;
 const ICON_COLLAPSE = `<svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>`;
 const ICON_DEVICE = `<svg viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg>`;
+const EMPTY_SYNCED_LINE_SYMBOL = "♪";
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -20,6 +22,9 @@ function formatTime(ms: number): string {
 export interface MiniPlayerUI {
   root: HTMLElement;
   update(state: PlaybackState | null, connected: boolean): void;
+  updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean): void;
+  setLyricsLoading(loading: boolean): void;
+  setStyle(style: MiniPlayerStyle): void;
   setDevices(devices: DeviceInfo[]): void;
   setVolume(percent: number): void;
   onVolumeChange(handler: (percent: number) => void): void;
@@ -32,8 +37,22 @@ export interface MiniPlayerUI {
 
 interface Rect { x: number; y: number; w: number; h: number }
 
-const POPUP_W = 280;
+const POPUP_W_DEFAULT = 280;
+const POPUP_W_MODERN = 336;
 const GAP = 8;
+
+function getPopupWidth(style: MiniPlayerStyle): number {
+  return style === "modern" ? POPUP_W_MODERN : POPUP_W_DEFAULT;
+}
+
+function getCompactPlainLyricLines(lyrics: string | null): string[] {
+  if (!lyrics) return [];
+  return lyrics
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+}
 
 export function createMiniPlayerUI(
   sendToBackend: (msg: unknown) => void,
@@ -42,6 +61,8 @@ export function createMiniPlayerUI(
 ): MiniPlayerUI {
   const root = document.createElement("div");
   root.className = "spotify-mini-player";
+  root.dataset.style = "default";
+  root.style.setProperty("--spotify-mini-player-width", `${POPUP_W_DEFAULT}px`);
 
   // ─── Build DOM ─────────────────────────────────────────────────────
 
@@ -56,8 +77,12 @@ export function createMiniPlayerUI(
   const artistName = document.createElement("div");
   artistName.className = "spotify-mini-artist";
 
+  const albumName = document.createElement("div");
+  albumName.className = "spotify-mini-album";
+
   info.appendChild(trackName);
   info.appendChild(artistName);
+  info.appendChild(albumName);
 
   const expandBtn = document.createElement("button");
   expandBtn.className = "spotify-mini-header-btn";
@@ -164,6 +189,21 @@ export function createMiniPlayerUI(
 
   root.appendChild(header);
   root.appendChild(progressRow);
+
+  const lyricsSection = document.createElement("div");
+  lyricsSection.className = "spotify-mini-lyrics-section";
+
+  const lyricsHeader = document.createElement("div");
+  lyricsHeader.className = "spotify-mini-lyrics-header";
+  lyricsHeader.textContent = "Lyrics";
+
+  const lyricsBody = document.createElement("div");
+  lyricsBody.className = "spotify-mini-lyrics-body";
+
+  lyricsSection.appendChild(lyricsHeader);
+  lyricsSection.appendChild(lyricsBody);
+
+  root.appendChild(lyricsSection);
   root.appendChild(controls);
   root.appendChild(volumeRow);
   root.appendChild(deviceRow);
@@ -176,11 +216,114 @@ export function createMiniPlayerUI(
   let currentDuration = 0;
   let visible = false;
   let cachedPopupH = 0;
+  let currentStyle: MiniPlayerStyle = "default";
+  let currentState: PlaybackState | null = null;
+  let currentConnected = false;
 
   let lastProgressMs = 0;
   let lastUpdateTime = 0;
   let lastIsPlaying = false;
   let animFrameId: number | null = null;
+  let lyricsTrackUri: string | null = null;
+  let syncedLyrics: Array<{ timeMs: number; text: string }> = [];
+  let plainLyricLines: string[] = [];
+  let lyricsInstrumental = false;
+  let lyricsLoading = false;
+  let activeLyricLineIndex = -1;
+
+  function getInterpolatedProgressMs(): number {
+    if (!lastIsPlaying) return lastProgressMs;
+    return Math.min(lastProgressMs + Math.max(0, Date.now() - lastUpdateTime), currentDuration || Infinity);
+  }
+
+  function getLyricWindow() {
+    if (syncedLyrics.length === 0) return [] as Array<{ text: string; index: number }>;
+    if (activeLyricLineIndex < 0) {
+      return syncedLyrics.slice(0, 5).map((line, index) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index }));
+    }
+
+    const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - 5));
+    return syncedLyrics
+      .slice(start, start + 5)
+      .map((line, offset) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index: start + offset }));
+  }
+
+  function renderLyricsWindow() {
+    lyricsBody.innerHTML = "";
+
+    if (lyricsLoading) {
+      const status = document.createElement("div");
+      status.className = "spotify-mini-lyrics-status spotify-mini-lyrics-status-loading";
+      status.textContent = "Loading lyrics...";
+      lyricsBody.appendChild(status);
+      return;
+    }
+
+    if (lyricsInstrumental) {
+      const status = document.createElement("div");
+      status.className = "spotify-mini-lyrics-status";
+      status.textContent = "♪ Instrumental";
+      lyricsBody.appendChild(status);
+      return;
+    }
+
+    if (syncedLyrics.length > 0) {
+      for (const line of getLyricWindow()) {
+        const el = document.createElement("div");
+        const distance = activeLyricLineIndex < 0 ? line.index : Math.abs(line.index - activeLyricLineIndex);
+        el.className = "spotify-mini-lyric-line";
+        if (line.index === activeLyricLineIndex) el.classList.add("spotify-mini-lyric-line-active");
+        else if (distance === 1) el.classList.add("spotify-mini-lyric-line-near");
+        else if (distance === 2) el.classList.add("spotify-mini-lyric-line-mid");
+        else el.classList.add("spotify-mini-lyric-line-far");
+        el.textContent = line.text;
+        lyricsBody.appendChild(el);
+      }
+      return;
+    }
+
+    if (plainLyricLines.length > 0) {
+      for (const line of plainLyricLines) {
+        const el = document.createElement("div");
+        el.className = "spotify-mini-lyric-line spotify-mini-lyric-line-plain";
+        el.textContent = line;
+        lyricsBody.appendChild(el);
+      }
+      return;
+    }
+
+    const status = document.createElement("div");
+    status.className = "spotify-mini-lyrics-status";
+    status.textContent = "No lyrics available";
+    lyricsBody.appendChild(status);
+  }
+
+  function updateActiveLyricLine(force = false) {
+    if (currentStyle !== "modern" || syncedLyrics.length === 0 || !currentState || currentState.trackUri !== lyricsTrackUri) {
+      if (force && currentStyle === "modern") renderLyricsWindow();
+      return;
+    }
+
+    const progressMs = getInterpolatedProgressMs();
+    let nextActiveLineIndex = -1;
+    for (let i = 0; i < syncedLyrics.length; i++) {
+      if (syncedLyrics[i].timeMs > progressMs) break;
+      nextActiveLineIndex = i;
+    }
+
+    if (force || nextActiveLineIndex !== activeLyricLineIndex) {
+      activeLyricLineIndex = nextActiveLineIndex;
+      renderLyricsWindow();
+    }
+  }
+
+  function refreshLyrics(reposition = false) {
+    const shouldShowLyrics = currentStyle === "modern" && currentConnected && Boolean(currentState);
+    lyricsSection.style.display = shouldShowLyrics ? "" : "none";
+    if (!shouldShowLyrics) return;
+    updateActiveLyricLine(true);
+    if (reposition && visible) applyPosition();
+  }
 
   function tickProgress() {
     if (!visible || !lastIsPlaying || !currentDuration) {
@@ -192,6 +335,7 @@ export function createMiniPlayerUI(
     const pct = (interpolated / currentDuration) * 100;
     progressFill.style.width = `${pct}%`;
     progressTime.textContent = formatTime(interpolated);
+    updateActiveLyricLine();
     animFrameId = requestAnimationFrame(tickProgress);
   }
 
@@ -287,8 +431,9 @@ export function createMiniPlayerUI(
     const vh = window.innerHeight;
 
     // Center popup horizontally on the widget, clamp to viewport
-    let left = ax + aw / 2 - POPUP_W / 2;
-    left = Math.max(GAP, Math.min(left, vw - POPUP_W - GAP));
+    const popupW = getPopupWidth(currentStyle);
+    let left = ax + aw / 2 - popupW / 2;
+    left = Math.max(GAP, Math.min(left, vw - popupW - GAP));
 
     // Measure actual height by briefly making content visible
     root.style.left = `${left}px`;
@@ -336,8 +481,9 @@ export function createMiniPlayerUI(
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    let left = ax + aw / 2 - POPUP_W / 2;
-    left = Math.max(GAP, Math.min(left, vw - POPUP_W - GAP));
+    const popupW = getPopupWidth(currentStyle);
+    let left = ax + aw / 2 - popupW / 2;
+    left = Math.max(GAP, Math.min(left, vw - popupW - GAP));
 
     let top: number;
     let below = false;
@@ -398,9 +544,13 @@ export function createMiniPlayerUI(
   }
 
   function update(state: PlaybackState | null, connected: boolean) {
+    currentState = state;
+    currentConnected = connected;
+
     if (!connected || !state) {
       header.style.display = "none";
       progressRow.style.display = "none";
+      lyricsSection.style.display = "none";
       controls.style.display = "none";
       volumeRow.style.display = "none";
       deviceRow.style.display = "none";
@@ -430,6 +580,7 @@ export function createMiniPlayerUI(
 
     trackName.textContent = state.trackName;
     artistName.textContent = state.artistName;
+    albumName.textContent = state.albumName;
     currentDuration = state.durationMs;
 
     art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
@@ -454,6 +605,38 @@ export function createMiniPlayerUI(
     } else {
       stopTicking();
     }
+
+    refreshLyrics();
+  }
+
+  function updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyricsText: string | null, instrumental: boolean) {
+    lyricsTrackUri = trackUri;
+    syncedLyrics = parseSyncedLyrics(syncedLyricsText);
+    plainLyricLines = getCompactPlainLyricLines(plainLyrics);
+    lyricsInstrumental = instrumental;
+    lyricsLoading = false;
+    activeLyricLineIndex = -1;
+    refreshLyrics(true);
+  }
+
+  function setLyricsLoading(loading: boolean) {
+    lyricsLoading = loading;
+    if (loading) {
+      lyricsTrackUri = currentState?.trackUri ?? null;
+      syncedLyrics = [];
+      plainLyricLines = [];
+      lyricsInstrumental = false;
+      activeLyricLineIndex = -1;
+    }
+    refreshLyrics(true);
+  }
+
+  function setStyle(style: MiniPlayerStyle) {
+    currentStyle = style;
+    root.dataset.style = style;
+    root.style.setProperty("--spotify-mini-player-width", `${getPopupWidth(style)}px`);
+    refreshLyrics(true);
+    if (visible) applyPosition();
   }
 
   function setDevices(devices: DeviceInfo[]) {
@@ -481,6 +664,9 @@ export function createMiniPlayerUI(
   return {
     root,
     update,
+    updateLyrics,
+    setLyricsLoading,
+    setStyle,
     setDevices,
     setVolume(percent: number) {
       volumeSlider.value = String(percent);

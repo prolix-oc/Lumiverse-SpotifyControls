@@ -1,5 +1,5 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
-import type { BackendToFrontend, PlaybackState, WidgetPrefs, AlbumColors } from "./types";
+import type { BackendToFrontend, PlaybackState, WidgetPrefs, AlbumColors, MiniPlayerStyle } from "./types";
 import { PANEL_CSS } from "./ui/styles";
 import { createSettingsUI } from "./ui/settings";
 import { createNowPlayingUI } from "./ui/now-playing";
@@ -28,31 +28,54 @@ export function setup(ctx: SpindleFrontendContext) {
   type SizeMode = "small" | "medium" | "large" | "custom";
   const SIZE_PRESETS: Record<Exclude<SizeMode, "custom">, number> = { small: 36, medium: 48, large: 64 };
   const PREFS_KEY = "spotify-controls-widget-prefs";
+
+  function normalizeWidgetPrefs(prefs?: Partial<WidgetPrefs> | null): WidgetPrefs {
+    const size = typeof prefs?.size === "number" && prefs.size >= 24 && prefs.size <= 128 ? prefs.size : 48;
+    let sizeMode = prefs?.sizeMode;
+    if (sizeMode !== "small" && sizeMode !== "medium" && sizeMode !== "large" && sizeMode !== "custom") {
+      if (size === 36) sizeMode = "small";
+      else if (size === 64) sizeMode = "large";
+      else if (size !== 48) sizeMode = "custom";
+      else sizeMode = "medium";
+    }
+
+    return {
+      size,
+      shape: prefs?.shape === "squircle" ? "squircle" : "circle",
+      sizeMode,
+      miniPlayerStyle: prefs?.miniPlayerStyle === "modern" ? "modern" : "default",
+      x: typeof prefs?.x === "number" ? prefs.x : undefined,
+      y: typeof prefs?.y === "number" ? prefs.y : undefined,
+    };
+  }
+
   let currentWidgetSize = 48;
   let currentArtShape: ArtShape = "circle";
   let currentSizeMode: SizeMode = "medium";
+  let currentMiniPlayerStyle: MiniPlayerStyle = "default";
   let savedX: number | undefined;
   let savedY: number | undefined;
   try {
-    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
-    if (typeof saved.size === "number" && saved.size >= 24 && saved.size <= 128) currentWidgetSize = saved.size;
-    if (saved.shape === "circle" || saved.shape === "squircle") currentArtShape = saved.shape;
-    if (["small", "medium", "large", "custom"].includes(saved.sizeMode)) {
-      currentSizeMode = saved.sizeMode;
-    } else {
-      // Infer mode from saved size for backward compat
-      if (currentWidgetSize === 36) currentSizeMode = "small";
-      else if (currentWidgetSize === 64) currentSizeMode = "large";
-      else if (currentWidgetSize !== 48) currentSizeMode = "custom";
-    }
-    if (typeof saved.x === "number") savedX = saved.x;
-    if (typeof saved.y === "number") savedY = saved.y;
+    const saved = normalizeWidgetPrefs(JSON.parse(localStorage.getItem(PREFS_KEY) || "{}"));
+    currentWidgetSize = saved.size;
+    currentArtShape = saved.shape;
+    currentSizeMode = saved.sizeMode;
+    currentMiniPlayerStyle = saved.miniPlayerStyle;
+    savedX = saved.x;
+    savedY = saved.y;
   } catch {}
   let lastKnownPos: { x: number; y: number } | null = null;
 
   function saveWidgetPrefs() {
     const pos = lastKnownPos ?? widget.getPosition();
-    const prefs: WidgetPrefs = { size: currentWidgetSize, shape: currentArtShape, sizeMode: currentSizeMode, x: pos.x, y: pos.y };
+    const prefs: WidgetPrefs = {
+      size: currentWidgetSize,
+      shape: currentArtShape,
+      sizeMode: currentSizeMode,
+      miniPlayerStyle: currentMiniPlayerStyle,
+      x: pos.x,
+      y: pos.y,
+    };
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     sendToBackend({ type: "save_widget_prefs", prefs });
   }
@@ -345,6 +368,7 @@ export function setup(ctx: SpindleFrontendContext) {
       return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
     }
   );
+  miniPlayer.setStyle(currentMiniPlayerStyle);
   cleanups.push(() => miniPlayer.destroy());
 
   // Sync volume between drawer controls and mini player
@@ -417,6 +441,9 @@ export function setup(ctx: SpindleFrontendContext) {
         { key: "div", label: "", type: "divider" },
         { key: "circle", label: "Circle", active: currentArtShape === "circle" },
         { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" },
+        { key: "div2", label: "", type: "divider" },
+        { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" },
+        { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" },
       ],
     });
 
@@ -431,6 +458,10 @@ export function setup(ctx: SpindleFrontendContext) {
       currentArtShape = selectedKey;
       saveWidgetPrefs();
       applyWidgetStyle();
+    } else if (selectedKey === "mini-default" || selectedKey === "mini-modern") {
+      currentMiniPlayerStyle = selectedKey === "mini-modern" ? "modern" : "default";
+      miniPlayer.setStyle(currentMiniPlayerStyle);
+      saveWidgetPrefs();
     }
   }
 
@@ -588,10 +619,12 @@ export function setup(ctx: SpindleFrontendContext) {
         if (trackUri && trackUri !== lastLyricsTrackUri) {
           lastLyricsTrackUri = trackUri;
           lyricsUI.setLoading(true);
+          miniPlayer.setLyricsLoading(true);
           sendToBackend({ type: "get_lyrics" });
         } else if (!trackUri && lastLyricsTrackUri) {
           lastLyricsTrackUri = null;
           lyricsUI.clear();
+          miniPlayer.updateLyrics(null, null, null, false);
         }
         break;
       }
@@ -610,12 +643,14 @@ export function setup(ctx: SpindleFrontendContext) {
         break;
 
       case "widget_prefs": {
-        const p = msg.prefs;
+        const p = normalizeWidgetPrefs(msg.prefs);
         if (!p) break;
         const sizeChanged = p.size !== currentWidgetSize;
-        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode;
+        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode || p.miniPlayerStyle !== currentMiniPlayerStyle;
         currentArtShape = p.shape;
         currentSizeMode = p.sizeMode;
+        currentMiniPlayerStyle = p.miniPlayerStyle;
+        miniPlayer.setStyle(currentMiniPlayerStyle);
         if (anyChanged) {
           localStorage.setItem(PREFS_KEY, JSON.stringify(p));
         }
@@ -668,6 +703,7 @@ export function setup(ctx: SpindleFrontendContext) {
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
         miniPlayer.update(null, false);
+        miniPlayer.updateLyrics(null, null, null, false);
         lyricsUI.clear();
         updateWidget(null);
         break;
@@ -676,6 +712,7 @@ export function setup(ctx: SpindleFrontendContext) {
         if (msg.trackUri && msg.trackUri !== lastLyricsTrackUri) break;
         lyricsUI.update(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         lyricsUI.updatePlayback(currentState);
+        miniPlayer.updateLyrics(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         break;
 
       case "error":

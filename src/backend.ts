@@ -135,6 +135,26 @@ async function handleUserChange(userId: string): Promise<void> {
 
 import type { PlaybackState } from "./types";
 
+function normalizeWidgetPrefs(prefs?: Partial<WidgetPrefs> | null): WidgetPrefs {
+  const size = typeof prefs?.size === "number" && prefs.size >= 24 && prefs.size <= 128 ? prefs.size : 48;
+  let sizeMode = prefs?.sizeMode;
+  if (sizeMode !== "small" && sizeMode !== "medium" && sizeMode !== "large" && sizeMode !== "custom") {
+    if (size === 36) sizeMode = "small";
+    else if (size === 64) sizeMode = "large";
+    else if (size !== 48) sizeMode = "custom";
+    else sizeMode = "medium";
+  }
+
+  return {
+    size,
+    shape: prefs?.shape === "squircle" ? "squircle" : "circle",
+    sizeMode,
+    miniPlayerStyle: prefs?.miniPlayerStyle === "modern" ? "modern" : "default",
+    x: typeof prefs?.x === "number" ? prefs.x : undefined,
+    y: typeof prefs?.y === "number" ? prefs.y : undefined,
+  };
+}
+
 let lastState: PlaybackState | null = null;
 let lastStateUpdatedAt = 0;
 
@@ -539,16 +559,17 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
 
       case "get_widget_prefs": {
-        const prefs = await spindle.userStorage.getJson<WidgetPrefs>("widget_prefs.json", {
-          fallback: { size: 48, shape: "circle", sizeMode: "medium" } as WidgetPrefs,
+        const stored = await spindle.userStorage.getJson<Partial<WidgetPrefs>>("widget_prefs.json", {
+          fallback: { size: 48, shape: "circle", sizeMode: "medium", miniPlayerStyle: "default" },
           userId,
         });
+        const prefs = normalizeWidgetPrefs(stored);
         send({ type: "widget_prefs", prefs }, userId);
         break;
       }
 
       case "save_widget_prefs": {
-        await spindle.userStorage.setJson("widget_prefs.json", msg.prefs, { userId });
+        await spindle.userStorage.setJson("widget_prefs.json", normalizeWidgetPrefs(msg.prefs), { userId });
         break;
       }
 

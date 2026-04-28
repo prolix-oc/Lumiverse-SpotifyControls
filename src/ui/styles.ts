@@ -509,7 +509,7 @@ export const PANEL_CSS = `
 .spotify-mini-player {
   position: fixed;
   z-index: 9990;
-  width: 280px;
+  width: var(--spotify-mini-player-width, 280px);
   background: var(--lumiverse-bg);
   border: 1px solid var(--lumiverse-border);
   border-radius: 12px;
@@ -525,6 +525,18 @@ export const PANEL_CSS = `
   pointer-events: none;
   transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
               opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.spotify-mini-player[data-style="modern"] {
+  gap: 12px;
+  padding: 14px;
+  border-radius: 24px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.06) 100%),
+    linear-gradient(180deg, rgba(18, 18, 20, 0.96) 0%, rgba(10, 10, 12, 0.98) 100%);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(26px) saturate(1.15);
 }
 
 .spotify-mini-player.open {
@@ -546,6 +558,11 @@ export const PANEL_CSS = `
   align-items: center;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-header {
+  align-items: stretch;
+  gap: 14px;
+}
+
 .spotify-mini-art {
   width: 48px;
   height: 48px;
@@ -553,6 +570,13 @@ export const PANEL_CSS = `
   object-fit: cover;
   flex-shrink: 0;
   background: var(--lumiverse-fill);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-art {
+  width: 94px;
+  height: 94px;
+  border-radius: 22px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
 }
 
 .spotify-mini-info {
@@ -563,12 +587,27 @@ export const PANEL_CSS = `
   gap: 2px;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-info {
+  justify-content: center;
+  gap: 4px;
+}
+
 .spotify-mini-track {
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-track {
+  font-size: 18px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .spotify-mini-artist {
@@ -579,10 +618,33 @@ export const PANEL_CSS = `
   text-overflow: ellipsis;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-artist {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.spotify-mini-album {
+  display: none;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.48);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-album {
+  display: block;
+}
+
 .spotify-mini-header-btns {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-header-btns {
+  align-self: flex-start;
+  gap: 6px;
 }
 
 .spotify-mini-header-btn {
@@ -600,9 +662,22 @@ export const PANEL_CSS = `
   transition: all 0.15s ease;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-header-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .spotify-mini-header-btn:hover {
   background: var(--lumiverse-fill-subtle);
   color: var(--lumiverse-text);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-header-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
 .spotify-mini-header-btn svg {
@@ -617,11 +692,20 @@ export const PANEL_CSS = `
   gap: 6px;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-progress-row {
+  gap: 8px;
+}
+
 .spotify-mini-time {
   font-size: 10px;
   color: var(--lumiverse-text-dim);
   min-width: 28px;
   text-align: center;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-time {
+  min-width: 32px;
+  color: rgba(255, 255, 255, 0.56);
 }
 
 .spotify-mini-progress-bar {
@@ -635,6 +719,13 @@ export const PANEL_CSS = `
   position: relative;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-progress-bar {
+  height: 6px;
+  padding: 7px 0;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+
 .spotify-mini-progress-fill {
   position: absolute;
   top: 6px;
@@ -645,11 +736,90 @@ export const PANEL_CSS = `
   pointer-events: none;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-progress-fill {
+  top: 7px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f6f7fb 0%, #c7ccd8 100%);
+}
+
+.spotify-mini-lyrics-section {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.spotify-mini-lyrics-header {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.spotify-mini-lyrics-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 132px;
+  justify-content: center;
+}
+
+.spotify-mini-lyrics-status {
+  font-size: 13px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.58);
+  text-align: center;
+}
+
+.spotify-mini-lyrics-status-loading {
+  animation: spotify-lyrics-loading-pulse 1.15s ease-in-out infinite;
+}
+
+.spotify-mini-lyric-line {
+  font-size: 16px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.22);
+  transition: color 220ms ease, transform 220ms ease, opacity 220ms ease;
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+
+.spotify-mini-lyric-line-active {
+  color: #fff;
+  transform: scale(1.035);
+  text-shadow: 0 0 16px rgba(255, 255, 255, 0.12);
+}
+
+.spotify-mini-lyric-line-near {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.spotify-mini-lyric-line-mid {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.spotify-mini-lyric-line-far,
+.spotify-mini-lyric-line-plain {
+  color: rgba(255, 255, 255, 0.24);
+}
+
 .spotify-mini-controls {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 16px;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-controls {
+  gap: 12px;
 }
 
 .spotify-mini-btn {
@@ -667,8 +837,19 @@ export const PANEL_CSS = `
   transition: all 0.15s ease;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn {
+  width: 42px;
+  height: 42px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .spotify-mini-btn:hover {
   background: var(--lumiverse-fill-subtle);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .spotify-mini-btn svg {
@@ -684,8 +865,19 @@ export const PANEL_CSS = `
   color: #fff;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn-main {
+  width: 58px;
+  height: 58px;
+  background: linear-gradient(180deg, #f5f7fb 0%, #d6dce8 100%);
+  color: #111318;
+}
+
 .spotify-mini-btn-main:hover {
   background: #1ed760;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn-main:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #e4e9f2 100%);
 }
 
 .spotify-mini-btn-main svg {
@@ -699,12 +891,20 @@ export const PANEL_CSS = `
   gap: 6px;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-volume-row {
+  padding: 0 4px;
+}
+
 .spotify-mini-volume-icon {
   width: 14px;
   height: 14px;
   display: flex;
   align-items: center;
   color: var(--lumiverse-text-muted);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-volume-icon {
+  color: rgba(255, 255, 255, 0.56);
 }
 
 .spotify-mini-volume-icon svg {
@@ -722,6 +922,10 @@ export const PANEL_CSS = `
   background: var(--lumiverse-fill-subtle);
   border: none;
   outline: none;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-volume-slider {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .spotify-mini-volume-slider::-webkit-slider-thumb {
@@ -768,6 +972,11 @@ export const PANEL_CSS = `
   padding: 6px 0 0;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-row {
+  padding-top: 4px;
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
 .spotify-mini-device-icon {
   width: 14px;
   height: 14px;
@@ -775,6 +984,10 @@ export const PANEL_CSS = `
   align-items: center;
   color: var(--lumiverse-text-dim);
   flex-shrink: 0;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-icon {
+  color: rgba(255, 255, 255, 0.48);
 }
 
 .spotify-mini-device-icon svg {
@@ -792,6 +1005,10 @@ export const PANEL_CSS = `
   text-overflow: ellipsis;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-name {
+  color: rgba(255, 255, 255, 0.62);
+}
+
 .spotify-mini-device-toggle {
   padding: 2px 8px;
   border-radius: 4px;
@@ -804,9 +1021,19 @@ export const PANEL_CSS = `
   transition: all 0.15s ease;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-toggle {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.76);
+}
+
 .spotify-mini-device-toggle:hover {
   background: var(--lumiverse-fill-subtle);
   color: var(--lumiverse-text);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .spotify-mini-device-list {

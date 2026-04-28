@@ -510,7 +510,7 @@ var PANEL_CSS = `
 .spotify-mini-player {
   position: fixed;
   z-index: 9990;
-  width: 280px;
+  width: var(--spotify-mini-player-width, 280px);
   background: var(--lumiverse-bg);
   border: 1px solid var(--lumiverse-border);
   border-radius: 12px;
@@ -526,6 +526,18 @@ var PANEL_CSS = `
   pointer-events: none;
   transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
               opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.spotify-mini-player[data-style="modern"] {
+  gap: 12px;
+  padding: 14px;
+  border-radius: 24px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.06) 100%),
+    linear-gradient(180deg, rgba(18, 18, 20, 0.96) 0%, rgba(10, 10, 12, 0.98) 100%);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(26px) saturate(1.15);
 }
 
 .spotify-mini-player.open {
@@ -547,6 +559,11 @@ var PANEL_CSS = `
   align-items: center;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-header {
+  align-items: stretch;
+  gap: 14px;
+}
+
 .spotify-mini-art {
   width: 48px;
   height: 48px;
@@ -554,6 +571,13 @@ var PANEL_CSS = `
   object-fit: cover;
   flex-shrink: 0;
   background: var(--lumiverse-fill);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-art {
+  width: 94px;
+  height: 94px;
+  border-radius: 22px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
 }
 
 .spotify-mini-info {
@@ -564,12 +588,27 @@ var PANEL_CSS = `
   gap: 2px;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-info {
+  justify-content: center;
+  gap: 4px;
+}
+
 .spotify-mini-track {
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-track {
+  font-size: 18px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .spotify-mini-artist {
@@ -580,10 +619,33 @@ var PANEL_CSS = `
   text-overflow: ellipsis;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-artist {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.spotify-mini-album {
+  display: none;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.48);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-album {
+  display: block;
+}
+
 .spotify-mini-header-btns {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-header-btns {
+  align-self: flex-start;
+  gap: 6px;
 }
 
 .spotify-mini-header-btn {
@@ -601,9 +663,22 @@ var PANEL_CSS = `
   transition: all 0.15s ease;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-header-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .spotify-mini-header-btn:hover {
   background: var(--lumiverse-fill-subtle);
   color: var(--lumiverse-text);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-header-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
 .spotify-mini-header-btn svg {
@@ -618,11 +693,20 @@ var PANEL_CSS = `
   gap: 6px;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-progress-row {
+  gap: 8px;
+}
+
 .spotify-mini-time {
   font-size: 10px;
   color: var(--lumiverse-text-dim);
   min-width: 28px;
   text-align: center;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-time {
+  min-width: 32px;
+  color: rgba(255, 255, 255, 0.56);
 }
 
 .spotify-mini-progress-bar {
@@ -636,6 +720,13 @@ var PANEL_CSS = `
   position: relative;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-progress-bar {
+  height: 6px;
+  padding: 7px 0;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+
 .spotify-mini-progress-fill {
   position: absolute;
   top: 6px;
@@ -646,11 +737,90 @@ var PANEL_CSS = `
   pointer-events: none;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-progress-fill {
+  top: 7px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f6f7fb 0%, #c7ccd8 100%);
+}
+
+.spotify-mini-lyrics-section {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.spotify-mini-lyrics-header {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.spotify-mini-lyrics-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 132px;
+  justify-content: center;
+}
+
+.spotify-mini-lyrics-status {
+  font-size: 13px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.58);
+  text-align: center;
+}
+
+.spotify-mini-lyrics-status-loading {
+  animation: spotify-lyrics-loading-pulse 1.15s ease-in-out infinite;
+}
+
+.spotify-mini-lyric-line {
+  font-size: 16px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.22);
+  transition: color 220ms ease, transform 220ms ease, opacity 220ms ease;
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+
+.spotify-mini-lyric-line-active {
+  color: #fff;
+  transform: scale(1.035);
+  text-shadow: 0 0 16px rgba(255, 255, 255, 0.12);
+}
+
+.spotify-mini-lyric-line-near {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.spotify-mini-lyric-line-mid {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.spotify-mini-lyric-line-far,
+.spotify-mini-lyric-line-plain {
+  color: rgba(255, 255, 255, 0.24);
+}
+
 .spotify-mini-controls {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 16px;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-controls {
+  gap: 12px;
 }
 
 .spotify-mini-btn {
@@ -668,8 +838,19 @@ var PANEL_CSS = `
   transition: all 0.15s ease;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn {
+  width: 42px;
+  height: 42px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .spotify-mini-btn:hover {
   background: var(--lumiverse-fill-subtle);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .spotify-mini-btn svg {
@@ -685,8 +866,19 @@ var PANEL_CSS = `
   color: #fff;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn-main {
+  width: 58px;
+  height: 58px;
+  background: linear-gradient(180deg, #f5f7fb 0%, #d6dce8 100%);
+  color: #111318;
+}
+
 .spotify-mini-btn-main:hover {
   background: #1ed760;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-btn-main:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #e4e9f2 100%);
 }
 
 .spotify-mini-btn-main svg {
@@ -700,12 +892,20 @@ var PANEL_CSS = `
   gap: 6px;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-volume-row {
+  padding: 0 4px;
+}
+
 .spotify-mini-volume-icon {
   width: 14px;
   height: 14px;
   display: flex;
   align-items: center;
   color: var(--lumiverse-text-muted);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-volume-icon {
+  color: rgba(255, 255, 255, 0.56);
 }
 
 .spotify-mini-volume-icon svg {
@@ -723,6 +923,10 @@ var PANEL_CSS = `
   background: var(--lumiverse-fill-subtle);
   border: none;
   outline: none;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-volume-slider {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .spotify-mini-volume-slider::-webkit-slider-thumb {
@@ -769,6 +973,11 @@ var PANEL_CSS = `
   padding: 6px 0 0;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-row {
+  padding-top: 4px;
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
 .spotify-mini-device-icon {
   width: 14px;
   height: 14px;
@@ -776,6 +985,10 @@ var PANEL_CSS = `
   align-items: center;
   color: var(--lumiverse-text-dim);
   flex-shrink: 0;
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-icon {
+  color: rgba(255, 255, 255, 0.48);
 }
 
 .spotify-mini-device-icon svg {
@@ -793,6 +1006,10 @@ var PANEL_CSS = `
   text-overflow: ellipsis;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-name {
+  color: rgba(255, 255, 255, 0.62);
+}
+
 .spotify-mini-device-toggle {
   padding: 2px 8px;
   border-radius: 4px;
@@ -805,9 +1022,19 @@ var PANEL_CSS = `
   transition: all 0.15s ease;
 }
 
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-toggle {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.76);
+}
+
 .spotify-mini-device-toggle:hover {
   background: var(--lumiverse-fill-subtle);
   color: var(--lumiverse-text);
+}
+
+.spotify-mini-player[data-style="modern"] .spotify-mini-device-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .spotify-mini-device-list {
@@ -1735,394 +1962,6 @@ function createSearchUI(sendToBackend) {
   };
 }
 
-// src/ui/mini-player.ts
-var ICON_PREV2 = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
-var ICON_PLAY2 = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
-var ICON_PAUSE2 = `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
-var ICON_NEXT2 = `<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>`;
-var ICON_VOLUME2 = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`;
-var ICON_EXPAND = `<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>`;
-var ICON_COLLAPSE = `<svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>`;
-var ICON_DEVICE = `<svg viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg>`;
-function formatTime2(ms) {
-  const totalSec = Math.floor(ms / 1000);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  return `${min}:${sec.toString().padStart(2, "0")}`;
-}
-var POPUP_W = 280;
-var GAP = 8;
-function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
-  const root = document.createElement("div");
-  root.className = "spotify-mini-player";
-  const art = createCrossfadeArt("spotify-mini-art");
-  const info = document.createElement("div");
-  info.className = "spotify-mini-info";
-  const trackName = document.createElement("div");
-  trackName.className = "spotify-mini-track";
-  const artistName = document.createElement("div");
-  artistName.className = "spotify-mini-artist";
-  info.appendChild(trackName);
-  info.appendChild(artistName);
-  const expandBtn = document.createElement("button");
-  expandBtn.className = "spotify-mini-header-btn";
-  expandBtn.innerHTML = ICON_EXPAND;
-  expandBtn.title = "Open full player";
-  const collapseBtn = document.createElement("button");
-  collapseBtn.className = "spotify-mini-header-btn";
-  collapseBtn.innerHTML = ICON_COLLAPSE;
-  collapseBtn.title = "Collapse";
-  const headerBtns = document.createElement("div");
-  headerBtns.className = "spotify-mini-header-btns";
-  headerBtns.appendChild(expandBtn);
-  headerBtns.appendChild(collapseBtn);
-  const progressRow = document.createElement("div");
-  progressRow.className = "spotify-mini-progress-row";
-  const progressTime = document.createElement("span");
-  progressTime.className = "spotify-mini-time";
-  const progressBar = document.createElement("div");
-  progressBar.className = "spotify-mini-progress-bar";
-  const progressFill = document.createElement("div");
-  progressFill.className = "spotify-mini-progress-fill";
-  progressBar.appendChild(progressFill);
-  const durationTime = document.createElement("span");
-  durationTime.className = "spotify-mini-time";
-  progressRow.appendChild(progressTime);
-  progressRow.appendChild(progressBar);
-  progressRow.appendChild(durationTime);
-  const controls = document.createElement("div");
-  controls.className = "spotify-mini-controls";
-  function makeBtn(html, cls = "") {
-    const b = document.createElement("button");
-    b.className = `spotify-mini-btn ${cls}`.trim();
-    b.innerHTML = html;
-    return b;
-  }
-  const prevBtn = makeBtn(ICON_PREV2);
-  const playPauseBtn = makeBtn(ICON_PLAY2, "spotify-mini-btn-main");
-  const nextBtn = makeBtn(ICON_NEXT2);
-  controls.appendChild(prevBtn);
-  controls.appendChild(playPauseBtn);
-  controls.appendChild(nextBtn);
-  const volumeRow = document.createElement("div");
-  volumeRow.className = "spotify-mini-volume-row";
-  const volumeIcon = document.createElement("span");
-  volumeIcon.className = "spotify-mini-volume-icon";
-  volumeIcon.innerHTML = ICON_VOLUME2;
-  const volumeSlider = document.createElement("input");
-  volumeSlider.type = "range";
-  volumeSlider.className = "spotify-mini-volume-slider";
-  volumeSlider.min = "0";
-  volumeSlider.max = "100";
-  volumeSlider.value = "50";
-  volumeRow.appendChild(volumeIcon);
-  volumeRow.appendChild(volumeSlider);
-  const deviceRow = document.createElement("div");
-  deviceRow.className = "spotify-mini-device-row";
-  const deviceIcon = document.createElement("span");
-  deviceIcon.className = "spotify-mini-device-icon";
-  deviceIcon.innerHTML = ICON_DEVICE;
-  const deviceName = document.createElement("span");
-  deviceName.className = "spotify-mini-device-name";
-  const deviceToggle = document.createElement("button");
-  deviceToggle.className = "spotify-mini-device-toggle";
-  deviceToggle.textContent = "Switch";
-  deviceRow.appendChild(deviceIcon);
-  deviceRow.appendChild(deviceName);
-  deviceRow.appendChild(deviceToggle);
-  const deviceList = document.createElement("div");
-  deviceList.className = "spotify-mini-device-list";
-  const emptyState = document.createElement("div");
-  emptyState.className = "spotify-mini-empty";
-  emptyState.textContent = "No active playback";
-  const header = document.createElement("div");
-  header.className = "spotify-mini-header";
-  header.appendChild(art.el);
-  header.appendChild(info);
-  header.appendChild(headerBtns);
-  root.appendChild(header);
-  root.appendChild(progressRow);
-  root.appendChild(controls);
-  root.appendChild(volumeRow);
-  root.appendChild(deviceRow);
-  root.appendChild(deviceList);
-  root.appendChild(emptyState);
-  let isPlaying = false;
-  let currentDuration = 0;
-  let visible = false;
-  let cachedPopupH = 0;
-  let lastProgressMs = 0;
-  let lastUpdateTime = 0;
-  let lastIsPlaying = false;
-  let animFrameId = null;
-  function tickProgress() {
-    if (!visible || !lastIsPlaying || !currentDuration) {
-      animFrameId = null;
-      return;
-    }
-    const elapsed = Date.now() - lastUpdateTime;
-    const interpolated = Math.min(lastProgressMs + elapsed, currentDuration);
-    const pct = interpolated / currentDuration * 100;
-    progressFill.style.width = `${pct}%`;
-    progressTime.textContent = formatTime2(interpolated);
-    animFrameId = requestAnimationFrame(tickProgress);
-  }
-  function startTicking() {
-    if (animFrameId !== null)
-      return;
-    animFrameId = requestAnimationFrame(tickProgress);
-  }
-  function stopTicking() {
-    if (animFrameId !== null) {
-      cancelAnimationFrame(animFrameId);
-      animFrameId = null;
-    }
-  }
-  prevBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    sendToBackend({ type: "previous" });
-  });
-  nextBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    sendToBackend({ type: "next" });
-  });
-  playPauseBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    sendToBackend({ type: isPlaying ? "pause" : "play" });
-  });
-  expandBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    hide();
-    onExpandClick();
-  });
-  collapseBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    hide();
-  });
-  progressBar.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (!currentDuration)
-      return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    sendToBackend({ type: "seek", positionMs: Math.round(pct * currentDuration) });
-  });
-  let volumeDebounce = null;
-  const volumeChangeHandlers = new Set;
-  volumeSlider.addEventListener("input", (e) => {
-    e.stopPropagation();
-    const percent = parseInt(volumeSlider.value, 10);
-    for (const h of volumeChangeHandlers)
-      h(percent);
-    if (volumeDebounce)
-      clearTimeout(volumeDebounce);
-    volumeDebounce = setTimeout(() => {
-      sendToBackend({ type: "set_volume", percent });
-    }, 200);
-  });
-  let deviceListOpen = false;
-  let currentDeviceId = null;
-  deviceToggle.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (deviceListOpen) {
-      deviceList.style.display = "none";
-      deviceListOpen = false;
-    } else {
-      sendToBackend({ type: "get_devices" });
-      deviceList.innerHTML = '<div class="spotify-mini-device-loading">Loading devices…</div>';
-      deviceList.style.display = "flex";
-      deviceListOpen = true;
-    }
-  });
-  root.addEventListener("pointerdown", (e) => e.stopPropagation());
-  function onDocClick(e) {
-    if (!root.contains(e.target)) {
-      hide();
-    }
-  }
-  function applyPosition() {
-    const { x: ax, y: ay, w: aw, h: ah } = getWidgetRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = ax + aw / 2 - POPUP_W / 2;
-    left = Math.max(GAP, Math.min(left, vw - POPUP_W - GAP));
-    root.style.left = `${left}px`;
-    root.style.top = "0px";
-    root.style.visibility = "hidden";
-    root.style.transform = "scale(1)";
-    root.style.display = "flex";
-    const popupH = root.offsetHeight;
-    cachedPopupH = popupH;
-    root.style.visibility = "";
-    root.style.transform = "";
-    root.style.display = "";
-    let top;
-    let below = false;
-    if (ay - popupH - GAP >= GAP) {
-      top = ay - popupH - GAP;
-    } else {
-      top = ay + ah + GAP;
-      below = true;
-    }
-    top = Math.max(GAP, Math.min(top, vh - popupH - GAP));
-    root.style.left = `${left}px`;
-    root.style.top = `${top}px`;
-    const originX = ax + aw / 2 - left;
-    const originY = below ? -GAP : popupH + GAP;
-    root.style.transformOrigin = `${originX}px ${originY}px`;
-  }
-  function repositionFast() {
-    if (!visible || !cachedPopupH)
-      return;
-    const { x: ax, y: ay, w: aw, h: ah } = getWidgetRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = ax + aw / 2 - POPUP_W / 2;
-    left = Math.max(GAP, Math.min(left, vw - POPUP_W - GAP));
-    let top;
-    let below = false;
-    if (ay - cachedPopupH - GAP >= GAP) {
-      top = ay - cachedPopupH - GAP;
-    } else {
-      top = ay + ah + GAP;
-      below = true;
-    }
-    top = Math.max(GAP, Math.min(top, vh - cachedPopupH - GAP));
-    root.style.left = `${left}px`;
-    root.style.top = `${top}px`;
-    const originX = ax + aw / 2 - left;
-    const originY = below ? -GAP : cachedPopupH + GAP;
-    root.style.transformOrigin = `${originX}px ${originY}px`;
-  }
-  function show() {
-    if (!document.body.contains(root)) {
-      document.body.appendChild(root);
-    }
-    applyPosition();
-    root.classList.remove("open", "closing");
-    root.offsetHeight;
-    root.classList.add("open");
-    visible = true;
-    if (lastIsPlaying)
-      startTicking();
-    setTimeout(() => document.addEventListener("click", onDocClick), 0);
-  }
-  function hide() {
-    if (!visible)
-      return;
-    visible = false;
-    document.removeEventListener("click", onDocClick);
-    stopTicking();
-    applyPosition();
-    root.classList.remove("open");
-    root.classList.add("closing");
-    const cleanup = () => {
-      root.classList.remove("closing");
-      root.removeEventListener("transitionend", cleanup);
-    };
-    root.addEventListener("transitionend", cleanup);
-    setTimeout(cleanup, 250);
-  }
-  function update(state, connected) {
-    if (!connected || !state) {
-      header.style.display = "none";
-      progressRow.style.display = "none";
-      controls.style.display = "none";
-      volumeRow.style.display = "none";
-      deviceRow.style.display = "none";
-      deviceList.style.display = "none";
-      deviceListOpen = false;
-      emptyState.style.display = "";
-      emptyState.textContent = !connected ? "Connect to Spotify in Settings" : "No active playback";
-      stopTicking();
-      return;
-    }
-    header.style.display = "";
-    progressRow.style.display = "";
-    controls.style.display = "";
-    volumeRow.style.display = "";
-    emptyState.style.display = "none";
-    if (state.deviceName) {
-      deviceName.textContent = state.deviceName;
-      deviceRow.style.display = "";
-      currentDeviceId = state.deviceId;
-    } else {
-      deviceRow.style.display = "none";
-    }
-    trackName.textContent = state.trackName;
-    artistName.textContent = state.artistName;
-    currentDuration = state.durationMs;
-    art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
-    isPlaying = state.isPlaying;
-    lastIsPlaying = state.isPlaying;
-    lastProgressMs = state.progressMs;
-    lastUpdateTime = Date.now();
-    playPauseBtn.innerHTML = isPlaying ? ICON_PAUSE2 : ICON_PLAY2;
-    const pct = state.durationMs > 0 ? state.progressMs / state.durationMs * 100 : 0;
-    progressFill.style.width = `${pct}%`;
-    progressTime.textContent = formatTime2(state.progressMs);
-    durationTime.textContent = formatTime2(state.durationMs);
-    if (state.volume !== null) {
-      volumeSlider.value = String(state.volume);
-    }
-    if (visible && isPlaying) {
-      startTicking();
-    } else {
-      stopTicking();
-    }
-  }
-  function setDevices(devices) {
-    deviceList.innerHTML = "";
-    if (devices.length === 0) {
-      deviceList.innerHTML = '<div class="spotify-mini-device-loading">No devices found</div>';
-      return;
-    }
-    for (const dev of devices) {
-      const item = document.createElement("div");
-      item.className = `spotify-mini-device-item${dev.isActive ? " active" : ""}`;
-      item.innerHTML = `<span class="spotify-mini-device-item-name">${dev.name}</span><span class="spotify-mini-device-item-type">${dev.type}</span>`;
-      if (!dev.isActive) {
-        item.addEventListener("click", (e) => {
-          e.stopPropagation();
-          sendToBackend({ type: "transfer_playback", deviceId: dev.id });
-          deviceList.style.display = "none";
-          deviceListOpen = false;
-        });
-      }
-      deviceList.appendChild(item);
-    }
-  }
-  return {
-    root,
-    update,
-    setDevices,
-    setVolume(percent) {
-      volumeSlider.value = String(percent);
-    },
-    onVolumeChange(handler) {
-      volumeChangeHandlers.add(handler);
-    },
-    toggle() {
-      if (visible) {
-        hide();
-      } else {
-        show();
-      }
-    },
-    hide,
-    isOpen: () => visible,
-    reposition: repositionFast,
-    destroy() {
-      hide();
-      stopTicking();
-      if (volumeDebounce)
-        clearTimeout(volumeDebounce);
-      volumeChangeHandlers.clear();
-      root.remove();
-    }
-  };
-}
-
 // src/ui/lyrics.ts
 var USER_SCROLL_SUPPRESS_MS = 2500;
 var LOADING_STATUS_DELAY_MS = 180;
@@ -2454,6 +2293,556 @@ function createLyricsUI(onSeek) {
   };
 }
 
+// src/ui/mini-player.ts
+var ICON_PREV2 = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
+var ICON_PLAY2 = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
+var ICON_PAUSE2 = `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+var ICON_NEXT2 = `<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>`;
+var ICON_VOLUME2 = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`;
+var ICON_EXPAND = `<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>`;
+var ICON_COLLAPSE = `<svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>`;
+var ICON_DEVICE = `<svg viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg>`;
+var EMPTY_SYNCED_LINE_SYMBOL2 = "♪";
+function formatTime2(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, "0")}`;
+}
+var POPUP_W_DEFAULT = 280;
+var POPUP_W_MODERN = 336;
+var GAP = 8;
+function getPopupWidth(style) {
+  return style === "modern" ? POPUP_W_MODERN : POPUP_W_DEFAULT;
+}
+function getCompactPlainLyricLines(lyrics) {
+  if (!lyrics)
+    return [];
+  return lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 5);
+}
+function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
+  const root = document.createElement("div");
+  root.className = "spotify-mini-player";
+  root.dataset.style = "default";
+  root.style.setProperty("--spotify-mini-player-width", `${POPUP_W_DEFAULT}px`);
+  const art = createCrossfadeArt("spotify-mini-art");
+  const info = document.createElement("div");
+  info.className = "spotify-mini-info";
+  const trackName = document.createElement("div");
+  trackName.className = "spotify-mini-track";
+  const artistName = document.createElement("div");
+  artistName.className = "spotify-mini-artist";
+  const albumName = document.createElement("div");
+  albumName.className = "spotify-mini-album";
+  info.appendChild(trackName);
+  info.appendChild(artistName);
+  info.appendChild(albumName);
+  const expandBtn = document.createElement("button");
+  expandBtn.className = "spotify-mini-header-btn";
+  expandBtn.innerHTML = ICON_EXPAND;
+  expandBtn.title = "Open full player";
+  const collapseBtn = document.createElement("button");
+  collapseBtn.className = "spotify-mini-header-btn";
+  collapseBtn.innerHTML = ICON_COLLAPSE;
+  collapseBtn.title = "Collapse";
+  const headerBtns = document.createElement("div");
+  headerBtns.className = "spotify-mini-header-btns";
+  headerBtns.appendChild(expandBtn);
+  headerBtns.appendChild(collapseBtn);
+  const progressRow = document.createElement("div");
+  progressRow.className = "spotify-mini-progress-row";
+  const progressTime = document.createElement("span");
+  progressTime.className = "spotify-mini-time";
+  const progressBar = document.createElement("div");
+  progressBar.className = "spotify-mini-progress-bar";
+  const progressFill = document.createElement("div");
+  progressFill.className = "spotify-mini-progress-fill";
+  progressBar.appendChild(progressFill);
+  const durationTime = document.createElement("span");
+  durationTime.className = "spotify-mini-time";
+  progressRow.appendChild(progressTime);
+  progressRow.appendChild(progressBar);
+  progressRow.appendChild(durationTime);
+  const controls = document.createElement("div");
+  controls.className = "spotify-mini-controls";
+  function makeBtn(html, cls = "") {
+    const b = document.createElement("button");
+    b.className = `spotify-mini-btn ${cls}`.trim();
+    b.innerHTML = html;
+    return b;
+  }
+  const prevBtn = makeBtn(ICON_PREV2);
+  const playPauseBtn = makeBtn(ICON_PLAY2, "spotify-mini-btn-main");
+  const nextBtn = makeBtn(ICON_NEXT2);
+  controls.appendChild(prevBtn);
+  controls.appendChild(playPauseBtn);
+  controls.appendChild(nextBtn);
+  const volumeRow = document.createElement("div");
+  volumeRow.className = "spotify-mini-volume-row";
+  const volumeIcon = document.createElement("span");
+  volumeIcon.className = "spotify-mini-volume-icon";
+  volumeIcon.innerHTML = ICON_VOLUME2;
+  const volumeSlider = document.createElement("input");
+  volumeSlider.type = "range";
+  volumeSlider.className = "spotify-mini-volume-slider";
+  volumeSlider.min = "0";
+  volumeSlider.max = "100";
+  volumeSlider.value = "50";
+  volumeRow.appendChild(volumeIcon);
+  volumeRow.appendChild(volumeSlider);
+  const deviceRow = document.createElement("div");
+  deviceRow.className = "spotify-mini-device-row";
+  const deviceIcon = document.createElement("span");
+  deviceIcon.className = "spotify-mini-device-icon";
+  deviceIcon.innerHTML = ICON_DEVICE;
+  const deviceName = document.createElement("span");
+  deviceName.className = "spotify-mini-device-name";
+  const deviceToggle = document.createElement("button");
+  deviceToggle.className = "spotify-mini-device-toggle";
+  deviceToggle.textContent = "Switch";
+  deviceRow.appendChild(deviceIcon);
+  deviceRow.appendChild(deviceName);
+  deviceRow.appendChild(deviceToggle);
+  const deviceList = document.createElement("div");
+  deviceList.className = "spotify-mini-device-list";
+  const emptyState = document.createElement("div");
+  emptyState.className = "spotify-mini-empty";
+  emptyState.textContent = "No active playback";
+  const header = document.createElement("div");
+  header.className = "spotify-mini-header";
+  header.appendChild(art.el);
+  header.appendChild(info);
+  header.appendChild(headerBtns);
+  root.appendChild(header);
+  root.appendChild(progressRow);
+  const lyricsSection = document.createElement("div");
+  lyricsSection.className = "spotify-mini-lyrics-section";
+  const lyricsHeader = document.createElement("div");
+  lyricsHeader.className = "spotify-mini-lyrics-header";
+  lyricsHeader.textContent = "Lyrics";
+  const lyricsBody = document.createElement("div");
+  lyricsBody.className = "spotify-mini-lyrics-body";
+  lyricsSection.appendChild(lyricsHeader);
+  lyricsSection.appendChild(lyricsBody);
+  root.appendChild(lyricsSection);
+  root.appendChild(controls);
+  root.appendChild(volumeRow);
+  root.appendChild(deviceRow);
+  root.appendChild(deviceList);
+  root.appendChild(emptyState);
+  let isPlaying = false;
+  let currentDuration = 0;
+  let visible = false;
+  let cachedPopupH = 0;
+  let currentStyle = "default";
+  let currentState = null;
+  let currentConnected = false;
+  let lastProgressMs = 0;
+  let lastUpdateTime = 0;
+  let lastIsPlaying = false;
+  let animFrameId = null;
+  let lyricsTrackUri = null;
+  let syncedLyrics = [];
+  let plainLyricLines = [];
+  let lyricsInstrumental = false;
+  let lyricsLoading = false;
+  let activeLyricLineIndex = -1;
+  function getInterpolatedProgressMs() {
+    if (!lastIsPlaying)
+      return lastProgressMs;
+    return Math.min(lastProgressMs + Math.max(0, Date.now() - lastUpdateTime), currentDuration || Infinity);
+  }
+  function getLyricWindow() {
+    if (syncedLyrics.length === 0)
+      return [];
+    if (activeLyricLineIndex < 0) {
+      return syncedLyrics.slice(0, 5).map((line, index) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL2, index }));
+    }
+    const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - 5));
+    return syncedLyrics.slice(start, start + 5).map((line, offset) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL2, index: start + offset }));
+  }
+  function renderLyricsWindow() {
+    lyricsBody.innerHTML = "";
+    if (lyricsLoading) {
+      const status2 = document.createElement("div");
+      status2.className = "spotify-mini-lyrics-status spotify-mini-lyrics-status-loading";
+      status2.textContent = "Loading lyrics...";
+      lyricsBody.appendChild(status2);
+      return;
+    }
+    if (lyricsInstrumental) {
+      const status2 = document.createElement("div");
+      status2.className = "spotify-mini-lyrics-status";
+      status2.textContent = "♪ Instrumental";
+      lyricsBody.appendChild(status2);
+      return;
+    }
+    if (syncedLyrics.length > 0) {
+      for (const line of getLyricWindow()) {
+        const el = document.createElement("div");
+        const distance = activeLyricLineIndex < 0 ? line.index : Math.abs(line.index - activeLyricLineIndex);
+        el.className = "spotify-mini-lyric-line";
+        if (line.index === activeLyricLineIndex)
+          el.classList.add("spotify-mini-lyric-line-active");
+        else if (distance === 1)
+          el.classList.add("spotify-mini-lyric-line-near");
+        else if (distance === 2)
+          el.classList.add("spotify-mini-lyric-line-mid");
+        else
+          el.classList.add("spotify-mini-lyric-line-far");
+        el.textContent = line.text;
+        lyricsBody.appendChild(el);
+      }
+      return;
+    }
+    if (plainLyricLines.length > 0) {
+      for (const line of plainLyricLines) {
+        const el = document.createElement("div");
+        el.className = "spotify-mini-lyric-line spotify-mini-lyric-line-plain";
+        el.textContent = line;
+        lyricsBody.appendChild(el);
+      }
+      return;
+    }
+    const status = document.createElement("div");
+    status.className = "spotify-mini-lyrics-status";
+    status.textContent = "No lyrics available";
+    lyricsBody.appendChild(status);
+  }
+  function updateActiveLyricLine(force = false) {
+    if (currentStyle !== "modern" || syncedLyrics.length === 0 || !currentState || currentState.trackUri !== lyricsTrackUri) {
+      if (force && currentStyle === "modern")
+        renderLyricsWindow();
+      return;
+    }
+    const progressMs = getInterpolatedProgressMs();
+    let nextActiveLineIndex = -1;
+    for (let i = 0;i < syncedLyrics.length; i++) {
+      if (syncedLyrics[i].timeMs > progressMs)
+        break;
+      nextActiveLineIndex = i;
+    }
+    if (force || nextActiveLineIndex !== activeLyricLineIndex) {
+      activeLyricLineIndex = nextActiveLineIndex;
+      renderLyricsWindow();
+    }
+  }
+  function refreshLyrics(reposition = false) {
+    const shouldShowLyrics = currentStyle === "modern" && currentConnected && Boolean(currentState);
+    lyricsSection.style.display = shouldShowLyrics ? "" : "none";
+    if (!shouldShowLyrics)
+      return;
+    updateActiveLyricLine(true);
+    if (reposition && visible)
+      applyPosition();
+  }
+  function tickProgress() {
+    if (!visible || !lastIsPlaying || !currentDuration) {
+      animFrameId = null;
+      return;
+    }
+    const elapsed = Date.now() - lastUpdateTime;
+    const interpolated = Math.min(lastProgressMs + elapsed, currentDuration);
+    const pct = interpolated / currentDuration * 100;
+    progressFill.style.width = `${pct}%`;
+    progressTime.textContent = formatTime2(interpolated);
+    updateActiveLyricLine();
+    animFrameId = requestAnimationFrame(tickProgress);
+  }
+  function startTicking() {
+    if (animFrameId !== null)
+      return;
+    animFrameId = requestAnimationFrame(tickProgress);
+  }
+  function stopTicking() {
+    if (animFrameId !== null) {
+      cancelAnimationFrame(animFrameId);
+      animFrameId = null;
+    }
+  }
+  prevBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sendToBackend({ type: "previous" });
+  });
+  nextBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sendToBackend({ type: "next" });
+  });
+  playPauseBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sendToBackend({ type: isPlaying ? "pause" : "play" });
+  });
+  expandBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    hide();
+    onExpandClick();
+  });
+  collapseBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    hide();
+  });
+  progressBar.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!currentDuration)
+      return;
+    const rect = progressBar.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    sendToBackend({ type: "seek", positionMs: Math.round(pct * currentDuration) });
+  });
+  let volumeDebounce = null;
+  const volumeChangeHandlers = new Set;
+  volumeSlider.addEventListener("input", (e) => {
+    e.stopPropagation();
+    const percent = parseInt(volumeSlider.value, 10);
+    for (const h of volumeChangeHandlers)
+      h(percent);
+    if (volumeDebounce)
+      clearTimeout(volumeDebounce);
+    volumeDebounce = setTimeout(() => {
+      sendToBackend({ type: "set_volume", percent });
+    }, 200);
+  });
+  let deviceListOpen = false;
+  let currentDeviceId = null;
+  deviceToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (deviceListOpen) {
+      deviceList.style.display = "none";
+      deviceListOpen = false;
+    } else {
+      sendToBackend({ type: "get_devices" });
+      deviceList.innerHTML = '<div class="spotify-mini-device-loading">Loading devices…</div>';
+      deviceList.style.display = "flex";
+      deviceListOpen = true;
+    }
+  });
+  root.addEventListener("pointerdown", (e) => e.stopPropagation());
+  function onDocClick(e) {
+    if (!root.contains(e.target)) {
+      hide();
+    }
+  }
+  function applyPosition() {
+    const { x: ax, y: ay, w: aw, h: ah } = getWidgetRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const popupW = getPopupWidth(currentStyle);
+    let left = ax + aw / 2 - popupW / 2;
+    left = Math.max(GAP, Math.min(left, vw - popupW - GAP));
+    root.style.left = `${left}px`;
+    root.style.top = "0px";
+    root.style.visibility = "hidden";
+    root.style.transform = "scale(1)";
+    root.style.display = "flex";
+    const popupH = root.offsetHeight;
+    cachedPopupH = popupH;
+    root.style.visibility = "";
+    root.style.transform = "";
+    root.style.display = "";
+    let top;
+    let below = false;
+    if (ay - popupH - GAP >= GAP) {
+      top = ay - popupH - GAP;
+    } else {
+      top = ay + ah + GAP;
+      below = true;
+    }
+    top = Math.max(GAP, Math.min(top, vh - popupH - GAP));
+    root.style.left = `${left}px`;
+    root.style.top = `${top}px`;
+    const originX = ax + aw / 2 - left;
+    const originY = below ? -GAP : popupH + GAP;
+    root.style.transformOrigin = `${originX}px ${originY}px`;
+  }
+  function repositionFast() {
+    if (!visible || !cachedPopupH)
+      return;
+    const { x: ax, y: ay, w: aw, h: ah } = getWidgetRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const popupW = getPopupWidth(currentStyle);
+    let left = ax + aw / 2 - popupW / 2;
+    left = Math.max(GAP, Math.min(left, vw - popupW - GAP));
+    let top;
+    let below = false;
+    if (ay - cachedPopupH - GAP >= GAP) {
+      top = ay - cachedPopupH - GAP;
+    } else {
+      top = ay + ah + GAP;
+      below = true;
+    }
+    top = Math.max(GAP, Math.min(top, vh - cachedPopupH - GAP));
+    root.style.left = `${left}px`;
+    root.style.top = `${top}px`;
+    const originX = ax + aw / 2 - left;
+    const originY = below ? -GAP : cachedPopupH + GAP;
+    root.style.transformOrigin = `${originX}px ${originY}px`;
+  }
+  function show() {
+    if (!document.body.contains(root)) {
+      document.body.appendChild(root);
+    }
+    applyPosition();
+    root.classList.remove("open", "closing");
+    root.offsetHeight;
+    root.classList.add("open");
+    visible = true;
+    if (lastIsPlaying)
+      startTicking();
+    setTimeout(() => document.addEventListener("click", onDocClick), 0);
+  }
+  function hide() {
+    if (!visible)
+      return;
+    visible = false;
+    document.removeEventListener("click", onDocClick);
+    stopTicking();
+    applyPosition();
+    root.classList.remove("open");
+    root.classList.add("closing");
+    const cleanup = () => {
+      root.classList.remove("closing");
+      root.removeEventListener("transitionend", cleanup);
+    };
+    root.addEventListener("transitionend", cleanup);
+    setTimeout(cleanup, 250);
+  }
+  function update(state, connected) {
+    currentState = state;
+    currentConnected = connected;
+    if (!connected || !state) {
+      header.style.display = "none";
+      progressRow.style.display = "none";
+      lyricsSection.style.display = "none";
+      controls.style.display = "none";
+      volumeRow.style.display = "none";
+      deviceRow.style.display = "none";
+      deviceList.style.display = "none";
+      deviceListOpen = false;
+      emptyState.style.display = "";
+      emptyState.textContent = !connected ? "Connect to Spotify in Settings" : "No active playback";
+      stopTicking();
+      return;
+    }
+    header.style.display = "";
+    progressRow.style.display = "";
+    controls.style.display = "";
+    volumeRow.style.display = "";
+    emptyState.style.display = "none";
+    if (state.deviceName) {
+      deviceName.textContent = state.deviceName;
+      deviceRow.style.display = "";
+      currentDeviceId = state.deviceId;
+    } else {
+      deviceRow.style.display = "none";
+    }
+    trackName.textContent = state.trackName;
+    artistName.textContent = state.artistName;
+    albumName.textContent = state.albumName;
+    currentDuration = state.durationMs;
+    art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
+    isPlaying = state.isPlaying;
+    lastIsPlaying = state.isPlaying;
+    lastProgressMs = state.progressMs;
+    lastUpdateTime = Date.now();
+    playPauseBtn.innerHTML = isPlaying ? ICON_PAUSE2 : ICON_PLAY2;
+    const pct = state.durationMs > 0 ? state.progressMs / state.durationMs * 100 : 0;
+    progressFill.style.width = `${pct}%`;
+    progressTime.textContent = formatTime2(state.progressMs);
+    durationTime.textContent = formatTime2(state.durationMs);
+    if (state.volume !== null) {
+      volumeSlider.value = String(state.volume);
+    }
+    if (visible && isPlaying) {
+      startTicking();
+    } else {
+      stopTicking();
+    }
+    refreshLyrics();
+  }
+  function updateLyrics(trackUri, plainLyrics, syncedLyricsText, instrumental) {
+    lyricsTrackUri = trackUri;
+    syncedLyrics = parseSyncedLyrics(syncedLyricsText);
+    plainLyricLines = getCompactPlainLyricLines(plainLyrics);
+    lyricsInstrumental = instrumental;
+    lyricsLoading = false;
+    activeLyricLineIndex = -1;
+    refreshLyrics(true);
+  }
+  function setLyricsLoading(loading) {
+    lyricsLoading = loading;
+    if (loading) {
+      lyricsTrackUri = currentState?.trackUri ?? null;
+      syncedLyrics = [];
+      plainLyricLines = [];
+      lyricsInstrumental = false;
+      activeLyricLineIndex = -1;
+    }
+    refreshLyrics(true);
+  }
+  function setStyle(style) {
+    currentStyle = style;
+    root.dataset.style = style;
+    root.style.setProperty("--spotify-mini-player-width", `${getPopupWidth(style)}px`);
+    refreshLyrics(true);
+    if (visible)
+      applyPosition();
+  }
+  function setDevices(devices) {
+    deviceList.innerHTML = "";
+    if (devices.length === 0) {
+      deviceList.innerHTML = '<div class="spotify-mini-device-loading">No devices found</div>';
+      return;
+    }
+    for (const dev of devices) {
+      const item = document.createElement("div");
+      item.className = `spotify-mini-device-item${dev.isActive ? " active" : ""}`;
+      item.innerHTML = `<span class="spotify-mini-device-item-name">${dev.name}</span><span class="spotify-mini-device-item-type">${dev.type}</span>`;
+      if (!dev.isActive) {
+        item.addEventListener("click", (e) => {
+          e.stopPropagation();
+          sendToBackend({ type: "transfer_playback", deviceId: dev.id });
+          deviceList.style.display = "none";
+          deviceListOpen = false;
+        });
+      }
+      deviceList.appendChild(item);
+    }
+  }
+  return {
+    root,
+    update,
+    updateLyrics,
+    setLyricsLoading,
+    setStyle,
+    setDevices,
+    setVolume(percent) {
+      volumeSlider.value = String(percent);
+    },
+    onVolumeChange(handler) {
+      volumeChangeHandlers.add(handler);
+    },
+    toggle() {
+      if (visible) {
+        hide();
+      } else {
+        show();
+      }
+    },
+    hide,
+    isOpen: () => visible,
+    reposition: repositionFast,
+    destroy() {
+      hide();
+      stopTicking();
+      if (volumeDebounce)
+        clearTimeout(volumeDebounce);
+      volumeChangeHandlers.clear();
+      root.remove();
+    }
+  };
+}
+
 // src/frontend.ts
 var SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 var MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
@@ -2465,36 +2854,54 @@ function setup(ctx) {
   let connected = false;
   const SIZE_PRESETS = { small: 36, medium: 48, large: 64 };
   const PREFS_KEY = "spotify-controls-widget-prefs";
+  function normalizeWidgetPrefs(prefs) {
+    const size = typeof prefs?.size === "number" && prefs.size >= 24 && prefs.size <= 128 ? prefs.size : 48;
+    let sizeMode = prefs?.sizeMode;
+    if (sizeMode !== "small" && sizeMode !== "medium" && sizeMode !== "large" && sizeMode !== "custom") {
+      if (size === 36)
+        sizeMode = "small";
+      else if (size === 64)
+        sizeMode = "large";
+      else if (size !== 48)
+        sizeMode = "custom";
+      else
+        sizeMode = "medium";
+    }
+    return {
+      size,
+      shape: prefs?.shape === "squircle" ? "squircle" : "circle",
+      sizeMode,
+      miniPlayerStyle: prefs?.miniPlayerStyle === "modern" ? "modern" : "default",
+      x: typeof prefs?.x === "number" ? prefs.x : undefined,
+      y: typeof prefs?.y === "number" ? prefs.y : undefined
+    };
+  }
   let currentWidgetSize = 48;
   let currentArtShape = "circle";
   let currentSizeMode = "medium";
+  let currentMiniPlayerStyle = "default";
   let savedX;
   let savedY;
   try {
-    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
-    if (typeof saved.size === "number" && saved.size >= 24 && saved.size <= 128)
-      currentWidgetSize = saved.size;
-    if (saved.shape === "circle" || saved.shape === "squircle")
-      currentArtShape = saved.shape;
-    if (["small", "medium", "large", "custom"].includes(saved.sizeMode)) {
-      currentSizeMode = saved.sizeMode;
-    } else {
-      if (currentWidgetSize === 36)
-        currentSizeMode = "small";
-      else if (currentWidgetSize === 64)
-        currentSizeMode = "large";
-      else if (currentWidgetSize !== 48)
-        currentSizeMode = "custom";
-    }
-    if (typeof saved.x === "number")
-      savedX = saved.x;
-    if (typeof saved.y === "number")
-      savedY = saved.y;
+    const saved = normalizeWidgetPrefs(JSON.parse(localStorage.getItem(PREFS_KEY) || "{}"));
+    currentWidgetSize = saved.size;
+    currentArtShape = saved.shape;
+    currentSizeMode = saved.sizeMode;
+    currentMiniPlayerStyle = saved.miniPlayerStyle;
+    savedX = saved.x;
+    savedY = saved.y;
   } catch {}
   let lastKnownPos = null;
   function saveWidgetPrefs() {
     const pos = lastKnownPos ?? widget.getPosition();
-    const prefs = { size: currentWidgetSize, shape: currentArtShape, sizeMode: currentSizeMode, x: pos.x, y: pos.y };
+    const prefs = {
+      size: currentWidgetSize,
+      shape: currentArtShape,
+      sizeMode: currentSizeMode,
+      miniPlayerStyle: currentMiniPlayerStyle,
+      x: pos.x,
+      y: pos.y
+    };
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     sendToBackend({ type: "save_widget_prefs", prefs });
   }
@@ -2737,6 +3144,7 @@ function setup(ctx) {
     const rect = widget.root.getBoundingClientRect();
     return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
   });
+  miniPlayer.setStyle(currentMiniPlayerStyle);
   cleanups.push(() => miniPlayer.destroy());
   controlsUI.onVolumeChange((pct) => miniPlayer.setVolume(pct));
   miniPlayer.onVolumeChange((pct) => controlsUI.setVolume(pct));
@@ -2796,7 +3204,10 @@ function setup(ctx) {
         { key: "custom", label: "Custom…", active: currentSizeMode === "custom" },
         { key: "div", label: "", type: "divider" },
         { key: "circle", label: "Circle", active: currentArtShape === "circle" },
-        { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" }
+        { key: "squircle", label: "Squircle", active: currentArtShape === "squircle" },
+        { key: "div2", label: "", type: "divider" },
+        { key: "mini-default", label: "Mini Player: Default", active: currentMiniPlayerStyle === "default" },
+        { key: "mini-modern", label: "Mini Player: Modern", active: currentMiniPlayerStyle === "modern" }
       ]
     });
     if (!selectedKey)
@@ -2810,6 +3221,10 @@ function setup(ctx) {
       currentArtShape = selectedKey;
       saveWidgetPrefs();
       applyWidgetStyle();
+    } else if (selectedKey === "mini-default" || selectedKey === "mini-modern") {
+      currentMiniPlayerStyle = selectedKey === "mini-modern" ? "modern" : "default";
+      miniPlayer.setStyle(currentMiniPlayerStyle);
+      saveWidgetPrefs();
     }
   }
   let longPressTimer = null;
@@ -2949,10 +3364,12 @@ function setup(ctx) {
         if (trackUri && trackUri !== lastLyricsTrackUri) {
           lastLyricsTrackUri = trackUri;
           lyricsUI.setLoading(true);
+          miniPlayer.setLyricsLoading(true);
           sendToBackend({ type: "get_lyrics" });
         } else if (!trackUri && lastLyricsTrackUri) {
           lastLyricsTrackUri = null;
           lyricsUI.clear();
+          miniPlayer.updateLyrics(null, null, null, false);
         }
         break;
       }
@@ -2967,13 +3384,15 @@ function setup(ctx) {
         miniPlayer.setDevices(msg.devices);
         break;
       case "widget_prefs": {
-        const p = msg.prefs;
+        const p = normalizeWidgetPrefs(msg.prefs);
         if (!p)
           break;
         const sizeChanged = p.size !== currentWidgetSize;
-        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode;
+        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode || p.miniPlayerStyle !== currentMiniPlayerStyle;
         currentArtShape = p.shape;
         currentSizeMode = p.sizeMode;
+        currentMiniPlayerStyle = p.miniPlayerStyle;
+        miniPlayer.setStyle(currentMiniPlayerStyle);
         if (anyChanged) {
           localStorage.setItem(PREFS_KEY, JSON.stringify(p));
         }
@@ -3012,6 +3431,7 @@ function setup(ctx) {
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
         miniPlayer.update(null, false);
+        miniPlayer.updateLyrics(null, null, null, false);
         lyricsUI.clear();
         updateWidget(null);
         break;
@@ -3020,6 +3440,7 @@ function setup(ctx) {
           break;
         lyricsUI.update(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         lyricsUI.updatePlayback(currentState);
+        miniPlayer.updateLyrics(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         break;
       case "error":
         console.warn("[Spotify Controls]", msg.message);

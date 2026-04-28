@@ -35,6 +35,11 @@ interface UpdateLineClassesOptions {
   behavior?: ScrollBehavior;
 }
 
+export interface ParsedSyncedLyricLine {
+  timeMs: number;
+  text: string;
+}
+
 function parseTimestamp(raw: string): number | null {
   const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw);
   if (!match) return null;
@@ -47,10 +52,10 @@ function parseTimestamp(raw: string): number | null {
   return minutes * 60_000 + seconds * 1000 + fraction;
 }
 
-function parseSyncedLyrics(value: string | null): Array<{ timeMs: number; text: string }> {
+export function parseSyncedLyrics(value: string | null): ParsedSyncedLyricLine[] {
   if (!value) return [];
 
-  const parsed: Array<{ timeMs: number; text: string }> = [];
+  const parsed: ParsedSyncedLyricLine[] = [];
   for (const line of value.split(/\r?\n/)) {
     const timestamps = [...line.matchAll(/\[([^\]]+)\]/g)]
       .map((match) => parseTimestamp(match[1]))
@@ -61,7 +66,7 @@ function parseSyncedLyrics(value: string | null): Array<{ timeMs: number; text: 
     for (const timeMs of timestamps) parsed.push({ timeMs, text });
   }
 
-  const grouped: Array<{ timeMs: number; text: string }> = [];
+  const grouped: ParsedSyncedLyricLine[] = [];
   for (const line of parsed.sort((a, b) => a.timeMs - b.timeMs)) {
     const previous = grouped[grouped.length - 1];
     if (previous?.timeMs === line.timeMs) {

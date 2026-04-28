@@ -65,6 +65,8 @@ export interface DeviceInfo {
   volume: number | null;
 }
 
+export type MiniPlayerStyle = "default" | "modern";
+
 export interface SearchResult {
   name: string;
   artist: string;
@@ -87,6 +89,7 @@ export interface WidgetPrefs {
   size: number;
   shape: "circle" | "squircle";
   sizeMode: "small" | "medium" | "large" | "custom";
+  miniPlayerStyle: MiniPlayerStyle;
   x?: number;
   y?: number;
 }
