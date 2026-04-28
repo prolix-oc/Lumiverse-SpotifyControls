@@ -1,5 +1,17 @@
 // src/ui/styles.ts
 var PANEL_CSS = `
+@property --spotify-modern-marquee-left-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --spotify-modern-marquee-right-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 .spotify-tab-root {
   display: flex;
   width: 100%;
@@ -556,30 +568,23 @@ var PANEL_CSS = `
 .spotify-modern-widget-expanded {
   position: absolute;
   inset: 0;
-  transform-origin: center center;
+  clip-path: inset(0 0 0 0);
   transition:
     opacity 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease);
+    clip-path var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease);
 }
 
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-expanded,
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-compact {
   opacity: 0;
   pointer-events: none;
-}
-
-.spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-expanded {
-  transform: scale(0.965);
-}
-
-.spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-compact {
-  transform: scale(0.915);
+  clip-path: inset(0 calc(100% - var(--spotify-modern-widget-collapsed-size)) calc(100% - var(--spotify-modern-widget-collapsed-size)) 0);
 }
 
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-expanded,
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-compact {
   opacity: 1;
-  transform: scale(1);
+  clip-path: inset(0 0 0 0);
 }
 
 .spotify-modern-widget-compact {
@@ -664,9 +669,7 @@ var PANEL_CSS = `
 .spotify-modern-widget-controls,
 .spotify-modern-widget-volume-row,
 .spotify-modern-widget-empty {
-  transition:
-    opacity 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform var(--spotify-modern-widget-motion-duration) var(--spotify-modern-widget-motion-ease);
+  transition: opacity 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-header,
@@ -677,7 +680,6 @@ var PANEL_CSS = `
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-volume-row,
 .spotify-modern-widget-player[data-expanded="false"] .spotify-modern-widget-empty {
   opacity: 0;
-  transform: translateY(10px) scale(0.985);
 }
 
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-header,
@@ -688,7 +690,6 @@ var PANEL_CSS = `
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-volume-row,
 .spotify-modern-widget-player[data-expanded="true"] .spotify-modern-widget-empty {
   opacity: 1;
-  transform: translateY(0) scale(1);
 }
 
 .spotify-modern-widget-header {
@@ -778,15 +779,19 @@ var PANEL_CSS = `
 }
 
 .spotify-modern-widget-marquee {
+  --spotify-modern-marquee-left-fade: 0px;
+  --spotify-modern-marquee-right-fade: 0px;
   position: relative;
   min-width: 0;
   overflow: hidden;
   -webkit-mask-image: none;
   mask-image: none;
+  transition:
+    --spotify-modern-marquee-left-fade 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    --spotify-modern-marquee-right-fade 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-modern-widget-marquee[data-overflow="true"] {
-  --spotify-modern-marquee-left-fade: 0px;
   --spotify-modern-marquee-right-fade: 18px;
   -webkit-mask-image: linear-gradient(
     90deg,
