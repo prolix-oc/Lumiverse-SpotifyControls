@@ -931,7 +931,7 @@ var PANEL_CSS = `
   background: transparent;
   border-radius: 10px;
   cursor: pointer;
-  transition: color 160ms ease, opacity 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition: color 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-lyrics-line-text {
@@ -946,7 +946,7 @@ var PANEL_CSS = `
   letter-spacing: -0.015em;
   transform: translateY(0);
   transform-origin: center center;
-  transition: transform 160ms ease, text-shadow 160ms ease, filter 160ms ease;
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), text-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1), filter 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-lyrics-line-enter {
