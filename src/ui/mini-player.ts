@@ -237,15 +237,30 @@ export function createMiniPlayerUI(
   }
 
   function getLyricWindow() {
+    const windowSize = 5;
     if (syncedLyrics.length === 0) return [] as Array<{ text: string; index: number }>;
+
+    const lines: Array<{ text: string; index: number }> = [];
+
     if (activeLyricLineIndex < 0) {
-      return syncedLyrics.slice(0, 5).map((line, index) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index }));
+      for (let index = 0; index < Math.min(windowSize, syncedLyrics.length); index++) {
+        const line = syncedLyrics[index];
+        lines.push({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index });
+      }
+    } else {
+      const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - windowSize));
+      for (let offset = 0; offset < windowSize && start + offset < syncedLyrics.length; offset++) {
+        const index = start + offset;
+        const line = syncedLyrics[index];
+        lines.push({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index });
+      }
     }
 
-    const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - 5));
-    return syncedLyrics
-      .slice(start, start + 5)
-      .map((line, offset) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL, index: start + offset }));
+    while (lines.length < windowSize) {
+      lines.push({ text: " ", index: -1 - lines.length });
+    }
+
+    return lines;
   }
 
   function renderLyricsWindow() {

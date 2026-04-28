@@ -592,6 +592,9 @@ export const PANEL_CSS = `
 }
 
 .spotify-modern-widget-compact {
+  inset: 0 auto auto 0;
+  width: var(--spotify-modern-widget-collapsed-size);
+  height: var(--spotify-modern-widget-collapsed-size);
   border-radius: inherit;
   overflow: hidden;
   padding: 6px;
@@ -1396,8 +1399,10 @@ export const PANEL_CSS = `
   display: flex;
   flex-direction: column;
   gap: 4px;
+  height: 132px;
   min-height: 132px;
   justify-content: center;
+  overflow: hidden;
 }
 
 .spotify-mini-lyrics-status {

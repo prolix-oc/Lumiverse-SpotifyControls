@@ -593,6 +593,9 @@ var PANEL_CSS = `
 }
 
 .spotify-modern-widget-compact {
+  inset: 0 auto auto 0;
+  width: var(--spotify-modern-widget-collapsed-size);
+  height: var(--spotify-modern-widget-collapsed-size);
   border-radius: inherit;
   overflow: hidden;
   padding: 6px;
@@ -1397,8 +1400,10 @@ var PANEL_CSS = `
   display: flex;
   flex-direction: column;
   gap: 4px;
+  height: 132px;
   min-height: 132px;
   justify-content: center;
+  overflow: hidden;
 }
 
 .spotify-mini-lyrics-status {
@@ -2883,13 +2888,27 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     return Math.min(lastProgressMs + Math.max(0, Date.now() - lastUpdateTime), currentDuration || Infinity);
   }
   function getLyricWindow() {
+    const windowSize = 5;
     if (syncedLyrics.length === 0)
       return [];
+    const lines = [];
     if (activeLyricLineIndex < 0) {
-      return syncedLyrics.slice(0, 5).map((line, index) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL2, index }));
+      for (let index = 0;index < Math.min(windowSize, syncedLyrics.length); index++) {
+        const line = syncedLyrics[index];
+        lines.push({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL2, index });
+      }
+    } else {
+      const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - windowSize));
+      for (let offset = 0;offset < windowSize && start + offset < syncedLyrics.length; offset++) {
+        const index = start + offset;
+        const line = syncedLyrics[index];
+        lines.push({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL2, index });
+      }
     }
-    const start = Math.max(0, Math.min(activeLyricLineIndex - 2, syncedLyrics.length - 5));
-    return syncedLyrics.slice(start, start + 5).map((line, offset) => ({ text: line.text || EMPTY_SYNCED_LINE_SYMBOL2, index: start + offset }));
+    while (lines.length < windowSize) {
+      lines.push({ text: " ", index: -1 - lines.length });
+    }
+    return lines;
   }
   function renderLyricsWindow() {
     lyricsBody.innerHTML = "";
