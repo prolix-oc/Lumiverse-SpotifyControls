@@ -909,6 +909,7 @@ export const PANEL_CSS = `
   line-height: 1.65;
   color: var(--lumiverse-text-muted);
   text-align: center;
+  text-wrap: pretty;
   padding: 8px 12px 24px;
 }
 
@@ -919,7 +920,6 @@ export const PANEL_CSS = `
 
 .spotify-lyrics-line {
   --spotify-lyrics-line-opacity: 1;
-  --spotify-lyrics-line-scale: 0.98;
   display: block;
   width: 100%;
   box-sizing: border-box;
@@ -928,16 +928,19 @@ export const PANEL_CSS = `
   font-weight: 600;
   line-height: 1.35;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-wrap: pretty;
   color: var(--lumiverse-text-dim);
   text-align: center;
   border-radius: 10px;
   letter-spacing: -0.015em;
   opacity: var(--spotify-lyrics-line-opacity);
-  transform: translateY(0) scale(var(--spotify-lyrics-line-scale));
+  background: transparent;
+  transform: translateY(0);
   transform-origin: center center;
   cursor: pointer;
-  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease, background 160ms ease, font-size 160ms ease, text-shadow 160ms ease;
+  transition: color 160ms ease, opacity 160ms ease, background 160ms ease, box-shadow 160ms ease, text-shadow 160ms ease, filter 160ms ease;
 }
 
 .spotify-lyrics-line-enter {
@@ -951,17 +954,15 @@ export const PANEL_CSS = `
 
 .spotify-lyrics-line-active {
   --spotify-lyrics-line-opacity: 1;
-  --spotify-lyrics-line-scale: 1.08;
   color: var(--lumiverse-text);
-  background: transparent;
-  font-weight: 700;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.02) 100%);
   opacity: 1;
-  letter-spacing: -0.02em;
-  text-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045), 0 10px 28px rgba(0, 0, 0, 0.16);
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.1);
+  filter: brightness(1.12);
 }
 
 .spotify-lyrics-line-near {
-  --spotify-lyrics-line-scale: 1.01;
   color: var(--lumiverse-text-muted);
 }
 
@@ -1003,13 +1004,13 @@ export const PANEL_CSS = `
 @keyframes spotify-lyrics-line-in {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.95);
+    transform: translateY(16px);
     filter: blur(8px);
   }
 
   to {
     opacity: var(--spotify-lyrics-line-opacity);
-    transform: translateY(0) scale(var(--spotify-lyrics-line-scale));
+    transform: translateY(0);
     filter: blur(0);
   }
 }
