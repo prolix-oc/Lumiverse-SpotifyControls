@@ -627,55 +627,33 @@ var PANEL_CSS = `
 
 .spotify-modern-widget-compact-overlay {
   position: absolute;
-  inset: 10px;
+  inset: 12px 12px 10px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 8px;
   pointer-events: none;
 }
 
 .spotify-modern-widget-compact-status {
-  align-self: flex-start;
-  max-width: calc(100% - 12px);
-  padding: 5px 9px;
-  border-radius: 999px;
-  background: rgba(6, 6, 8, 0.38);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
-  -webkit-backdrop-filter: blur(14px) saturate(1.15);
-  backdrop-filter: blur(14px) saturate(1.15);
-  font-size: clamp(10px, calc(var(--spotify-modern-widget-collapsed-size) * 0.086), 11px);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.82);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.32);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: none;
 }
 
 .spotify-modern-widget-compact-progress {
   align-self: stretch;
   margin-top: auto;
-  padding: 2px;
-  height: 10px;
+  height: 4px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(6, 6, 8, 0.32);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-    0 12px 28px rgba(0, 0, 0, 0.18);
-  -webkit-backdrop-filter: blur(14px) saturate(1.1);
-  backdrop-filter: blur(14px) saturate(1.1);
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .spotify-modern-widget-compact-progress-fill {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(252, 253, 255, 0.98) 0%, rgba(216, 224, 236, 0.92) 100%);
-  box-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .spotify-modern-widget-expanded {
