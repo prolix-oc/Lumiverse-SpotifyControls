@@ -808,7 +808,7 @@ spindle.registerMacro({
   description: "Returns the currently playing Spotify track",
   returnType: "string",
   handler: (async () => {
-    const state = lastState || (spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null);
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
     if (!state) return "Nothing playing";
     return `${state.artistName} - ${state.trackName} (${state.albumName})`;
   }) as any,
@@ -820,7 +820,7 @@ spindle.registerMacro({
   description: "Returns the URL of the currently playing track's album art",
   returnType: "string",
   handler: (async () => {
-    const state = lastState || (spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null);
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
     return state?.albumArtUrl || "";
   }) as any,
 });

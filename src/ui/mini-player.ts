@@ -634,6 +634,7 @@ export function createMiniPlayerUI(
     }
 
     if (!connected || !state) {
+      art.setUrl(null);
       header.style.display = "none";
       progressRow.style.display = "none";
       lyricsSection.style.display = "none";
@@ -646,6 +647,10 @@ export function createMiniPlayerUI(
       emptyState.textContent = !connected
         ? "Connect to Spotify in Settings"
         : "No active playback";
+      currentDuration = 0;
+      progressFill.style.width = "0%";
+      progressTime.textContent = formatTime(0);
+      durationTime.textContent = formatTime(0);
       stopTicking();
       return;
     }

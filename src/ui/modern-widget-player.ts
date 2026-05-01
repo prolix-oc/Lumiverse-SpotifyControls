@@ -285,6 +285,18 @@ export function createModernWidgetPlayerUI(
 
   const emptyState = document.createElement("div");
   emptyState.className = "spotify-modern-widget-empty";
+  const emptyIcon = document.createElement("div");
+  emptyIcon.className = "spotify-modern-widget-empty-icon";
+  emptyIcon.innerHTML = ICON_NOTE;
+  const emptyTitle = document.createElement("div");
+  emptyTitle.className = "spotify-modern-widget-empty-title";
+  emptyTitle.textContent = "No music playing.";
+  const emptySubtitle = document.createElement("div");
+  emptySubtitle.className = "spotify-modern-widget-empty-subtitle";
+  emptySubtitle.textContent = "Your speakers are enjoying a brief moment of mindfulness.";
+  emptyState.appendChild(emptyIcon);
+  emptyState.appendChild(emptyTitle);
+  emptyState.appendChild(emptySubtitle);
 
   expanded.appendChild(header);
   expanded.appendChild(hero);
@@ -578,11 +590,12 @@ export function createModernWidgetPlayerUI(
   function update(playbackState: PlaybackState | null, isConnected: boolean) {
     state = playbackState;
     connected = isConnected;
+    root.dataset.empty = !playbackState ? "true" : "false";
 
     if (!isConnected || !playbackState) {
+      eyebrow.textContent = isConnected ? "Standby" : "Connect Spotify";
       compactStatus.textContent = isConnected ? "No playback" : "Connect Spotify";
-      emptyState.style.display = "";
-      emptyState.textContent = isConnected ? "Start playback to open the modern player." : "Connect Spotify in Settings to use the modern player.";
+      emptyState.style.display = "grid";
       hero.style.display = "none";
       progressRow.style.display = "none";
       lyricsSection.style.display = "none";
@@ -592,11 +605,13 @@ export function createModernWidgetPlayerUI(
       renderCompactArt(null);
       renderHeroArt(null);
       syncedLyricsModel.setPlayback(null);
+      lastMetadataSignature = "";
       stopTicking();
       renderLyrics();
       return;
     }
 
+    eyebrow.textContent = "Now Playing";
     const artUrl = getTrackScopedArtUrl(playbackState.albumArtUrl, playbackState.trackUri);
     renderCompactArt(artUrl);
     renderHeroArt(artUrl);

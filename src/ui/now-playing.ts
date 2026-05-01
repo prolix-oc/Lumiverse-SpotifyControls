@@ -117,10 +117,15 @@ export function createNowPlayingUI(
   });
 
   function showEmpty(message: string) {
+    art.setUrl(null);
     container.style.display = "none";
     progressContainer.style.display = "none";
     emptyState.textContent = message;
     if (!root.contains(emptyState)) root.appendChild(emptyState);
+    currentDuration = 0;
+    progressFill.style.width = "0%";
+    progressTime.textContent = formatTime(0);
+    durationTime.textContent = formatTime(0);
     stopTicking();
   }
 

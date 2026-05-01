@@ -412,6 +412,13 @@ export function setup(ctx: SpindleFrontendContext) {
   animateWidgetMount();
 
   function getModernExpandedSize() {
+    if (!currentState) {
+      return {
+        width: Math.max(280, Math.min(320, window.innerWidth - 24)),
+        height: 196,
+      };
+    }
+
     return {
       width: Math.max(300, Math.min(348, window.innerWidth - 24)),
       height: Math.max(420, Math.min(520, window.innerHeight - 24)),
@@ -780,6 +787,7 @@ export function setup(ctx: SpindleFrontendContext) {
 
     switch (msg.type) {
       case "state": {
+        const hadPlayback = !!currentState;
         currentState = msg.playbackState;
         connected = msg.connected;
         syncWidgetVisibility();
@@ -788,6 +796,10 @@ export function setup(ctx: SpindleFrontendContext) {
         miniPlayer.update(currentState, connected);
         lyricsUI.updatePlayback(currentState);
         updateWidget(currentState);
+        if (currentMiniPlayerStyle === "modern" && modernWidgetExpanded && hadPlayback !== !!currentState) {
+          applyWidgetStyle();
+          requestAnimationFrame(clampWidgetPosition);
+        }
         scheduleTrackEndRefresh(currentState);
         // Extract album art colors for theme when art changes
         const artUrl = getTrackScopedArtUrl(currentState?.albumArtUrl ?? null, currentState?.trackUri);

@@ -519,6 +519,8 @@ export const PANEL_CSS = `
 /* Modern expanding widget player */
 .spotify-modern-widget-player {
   --spotify-modern-widget-collapsed-size: 48px;
+  --spotify-modern-widget-empty-expanded-width: 300px;
+  --spotify-modern-widget-empty-expanded-height: 196px;
   --spotify-modern-expanded-surface: var(--lcs-glass-bg, var(--lumiverse-bg-elevated));
   --spotify-modern-expanded-surface-alt: var(--lcs-glass-bg-hover, var(--lumiverse-bg));
   --spotify-modern-widget-motion-duration: 420ms;
@@ -566,6 +568,10 @@ export const PANEL_CSS = `
     linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
   border-color: var(--lcs-glass-border, var(--lumiverse-border));
   box-shadow: var(--lumiverse-shadow-xl);
+}
+
+.spotify-modern-widget-player[data-expanded="true"][data-empty="true"] {
+  min-height: var(--spotify-modern-widget-empty-expanded-height);
 }
 
 .spotify-modern-widget-compact,
@@ -665,6 +671,11 @@ export const PANEL_CSS = `
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.014) 0%, rgba(255, 255, 255, 0.005) 100%),
     linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
+}
+
+.spotify-modern-widget-player[data-empty="true"] .spotify-modern-widget-expanded {
+  grid-template-rows: auto 1fr;
+  gap: 12px;
 }
 
 .spotify-modern-widget-header,
@@ -1077,11 +1088,49 @@ export const PANEL_CSS = `
 
 .spotify-modern-widget-empty {
   display: none;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-height: 0;
   text-align: center;
-  font-size: 13px;
+  padding: 10px 12px 16px;
+}
+
+.spotify-modern-widget-empty-icon {
+  width: 62px;
+  height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%),
+    rgba(255, 255, 255, 0.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.spotify-modern-widget-empty-icon svg {
+  width: 28px;
+  height: 28px;
+  fill: rgba(255, 255, 255, 0.84);
+}
+
+.spotify-modern-widget-empty-title {
+  font-size: 24px;
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #fff;
+}
+
+.spotify-modern-widget-empty-subtitle {
+  max-width: 26ch;
+  font-size: 12px;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.6);
-  padding: 12px 8px;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.58);
 }
 
 @keyframes spotify-modern-marquee {

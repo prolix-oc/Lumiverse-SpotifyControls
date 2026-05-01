@@ -520,6 +520,8 @@ var PANEL_CSS = `
 /* Modern expanding widget player */
 .spotify-modern-widget-player {
   --spotify-modern-widget-collapsed-size: 48px;
+  --spotify-modern-widget-empty-expanded-width: 300px;
+  --spotify-modern-widget-empty-expanded-height: 196px;
   --spotify-modern-expanded-surface: var(--lcs-glass-bg, var(--lumiverse-bg-elevated));
   --spotify-modern-expanded-surface-alt: var(--lcs-glass-bg-hover, var(--lumiverse-bg));
   --spotify-modern-widget-motion-duration: 420ms;
@@ -567,6 +569,10 @@ var PANEL_CSS = `
     linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
   border-color: var(--lcs-glass-border, var(--lumiverse-border));
   box-shadow: var(--lumiverse-shadow-xl);
+}
+
+.spotify-modern-widget-player[data-expanded="true"][data-empty="true"] {
+  min-height: var(--spotify-modern-widget-empty-expanded-height);
 }
 
 .spotify-modern-widget-compact,
@@ -666,6 +672,11 @@ var PANEL_CSS = `
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.014) 0%, rgba(255, 255, 255, 0.005) 100%),
     linear-gradient(180deg, var(--spotify-modern-expanded-surface) 0%, var(--spotify-modern-expanded-surface-alt) 100%);
+}
+
+.spotify-modern-widget-player[data-empty="true"] .spotify-modern-widget-expanded {
+  grid-template-rows: auto 1fr;
+  gap: 12px;
 }
 
 .spotify-modern-widget-header,
@@ -1078,11 +1089,49 @@ var PANEL_CSS = `
 
 .spotify-modern-widget-empty {
   display: none;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-height: 0;
   text-align: center;
-  font-size: 13px;
+  padding: 10px 12px 16px;
+}
+
+.spotify-modern-widget-empty-icon {
+  width: 62px;
+  height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%),
+    rgba(255, 255, 255, 0.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.spotify-modern-widget-empty-icon svg {
+  width: 28px;
+  height: 28px;
+  fill: rgba(255, 255, 255, 0.84);
+}
+
+.spotify-modern-widget-empty-title {
+  font-size: 24px;
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #fff;
+}
+
+.spotify-modern-widget-empty-subtitle {
+  max-width: 26ch;
+  font-size: 12px;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.6);
-  padding: 12px 8px;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.58);
 }
 
 @keyframes spotify-modern-marquee {
@@ -2329,11 +2378,16 @@ function createNowPlayingUI(onSeek) {
     onSeek(Math.round(pct * currentDuration));
   });
   function showEmpty(message) {
+    art.setUrl(null);
     container.style.display = "none";
     progressContainer.style.display = "none";
     emptyState.textContent = message;
     if (!root.contains(emptyState))
       root.appendChild(emptyState);
+    currentDuration = 0;
+    progressFill.style.width = "0%";
+    progressTime.textContent = formatTime(0);
+    durationTime.textContent = formatTime(0);
     stopTicking();
   }
   function update(state, connected) {
@@ -3213,6 +3267,7 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       return;
     }
     if (!connected || !state) {
+      art.setUrl(null);
       header.style.display = "none";
       progressRow.style.display = "none";
       lyricsSection.style.display = "none";
@@ -3223,6 +3278,10 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       deviceListOpen = false;
       emptyState.style.display = "";
       emptyState.textContent = !connected ? "Connect to Spotify in Settings" : "No active playback";
+      currentDuration = 0;
+      progressFill.style.width = "0%";
+      progressTime.textContent = formatTime2(0);
+      durationTime.textContent = formatTime2(0);
       stopTicking();
       return;
     }
@@ -3592,6 +3651,18 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   volumeRow.appendChild(volumeSlider);
   const emptyState = document.createElement("div");
   emptyState.className = "spotify-modern-widget-empty";
+  const emptyIcon = document.createElement("div");
+  emptyIcon.className = "spotify-modern-widget-empty-icon";
+  emptyIcon.innerHTML = ICON_NOTE;
+  const emptyTitle = document.createElement("div");
+  emptyTitle.className = "spotify-modern-widget-empty-title";
+  emptyTitle.textContent = "No music playing.";
+  const emptySubtitle = document.createElement("div");
+  emptySubtitle.className = "spotify-modern-widget-empty-subtitle";
+  emptySubtitle.textContent = "Your speakers are enjoying a brief moment of mindfulness.";
+  emptyState.appendChild(emptyIcon);
+  emptyState.appendChild(emptyTitle);
+  emptyState.appendChild(emptySubtitle);
   expanded.appendChild(header);
   expanded.appendChild(hero);
   expanded.appendChild(progressRow);
@@ -3860,10 +3931,11 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   function update(playbackState, isConnected) {
     state = playbackState;
     connected = isConnected;
+    root.dataset.empty = !playbackState ? "true" : "false";
     if (!isConnected || !playbackState) {
+      eyebrow.textContent = isConnected ? "Standby" : "Connect Spotify";
       compactStatus.textContent = isConnected ? "No playback" : "Connect Spotify";
-      emptyState.style.display = "";
-      emptyState.textContent = isConnected ? "Start playback to open the modern player." : "Connect Spotify in Settings to use the modern player.";
+      emptyState.style.display = "grid";
       hero.style.display = "none";
       progressRow.style.display = "none";
       lyricsSection.style.display = "none";
@@ -3873,10 +3945,12 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       renderCompactArt(null);
       renderHeroArt(null);
       syncedLyricsModel.setPlayback(null);
+      lastMetadataSignature = "";
       stopTicking();
       renderLyrics();
       return;
     }
+    eyebrow.textContent = "Now Playing";
     const artUrl = getTrackScopedArtUrl(playbackState.albumArtUrl, playbackState.trackUri);
     renderCompactArt(artUrl);
     renderHeroArt(artUrl);
@@ -4586,6 +4660,12 @@ function setup(ctx) {
   widget.root.appendChild(widgetContent);
   animateWidgetMount();
   function getModernExpandedSize() {
+    if (!currentState) {
+      return {
+        width: Math.max(280, Math.min(320, window.innerWidth - 24)),
+        height: 196
+      };
+    }
     return {
       width: Math.max(300, Math.min(348, window.innerWidth - 24)),
       height: Math.max(420, Math.min(520, window.innerHeight - 24))
@@ -4893,6 +4973,7 @@ function setup(ctx) {
     const msg = raw;
     switch (msg.type) {
       case "state": {
+        const hadPlayback = !!currentState;
         currentState = msg.playbackState;
         connected = msg.connected;
         syncWidgetVisibility();
@@ -4901,6 +4982,10 @@ function setup(ctx) {
         miniPlayer.update(currentState, connected);
         lyricsUI.updatePlayback(currentState);
         updateWidget(currentState);
+        if (currentMiniPlayerStyle === "modern" && modernWidgetExpanded && hadPlayback !== !!currentState) {
+          applyWidgetStyle();
+          requestAnimationFrame(clampWidgetPosition);
+        }
         scheduleTrackEndRefresh(currentState);
         const artUrl = getTrackScopedArtUrl(currentState?.albumArtUrl ?? null, currentState?.trackUri);
         if (artUrl !== lastThemeArtUrl) {
