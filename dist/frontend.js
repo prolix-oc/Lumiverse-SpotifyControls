@@ -769,6 +769,7 @@ var PANEL_CSS = `
   height: 108px;
   border-radius: 24px;
   overflow: hidden;
+  cursor: pointer;
   transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease;
 }
 
@@ -3582,9 +3583,15 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   const hero = document.createElement("div");
   hero.className = "spotify-modern-widget-hero";
   const heroArt = createCrossfadeArt("spotify-modern-widget-art");
+  heroArt.el.title = "Collapse";
   const heroFallback = document.createElement("div");
   heroFallback.className = "spotify-modern-widget-art-fallback";
   heroFallback.innerHTML = ICON_NOTE;
+  heroFallback.title = "Collapse";
+  stopEventPropagation(heroArt.el);
+  stopEventPropagation(heroFallback);
+  heroArt.el.addEventListener("click", () => onCollapseClick());
+  heroFallback.addEventListener("click", () => onCollapseClick());
   const meta = document.createElement("div");
   meta.className = "spotify-modern-widget-meta";
   const trackName = createMarqueeLabel("spotify-modern-widget-track");

@@ -768,6 +768,7 @@ export const PANEL_CSS = `
   height: 108px;
   border-radius: 24px;
   overflow: hidden;
+  cursor: pointer;
   transition: border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease;
 }
 

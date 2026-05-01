@@ -208,9 +208,16 @@ export function createModernWidgetPlayerUI(
   hero.className = "spotify-modern-widget-hero";
 
   const heroArt = createCrossfadeArt("spotify-modern-widget-art");
+  heroArt.el.title = "Collapse";
   const heroFallback = document.createElement("div");
   heroFallback.className = "spotify-modern-widget-art-fallback";
   heroFallback.innerHTML = ICON_NOTE;
+  heroFallback.title = "Collapse";
+
+  stopEventPropagation(heroArt.el);
+  stopEventPropagation(heroFallback);
+  heroArt.el.addEventListener("click", () => onCollapseClick());
+  heroFallback.addEventListener("click", () => onCollapseClick());
 
   const meta = document.createElement("div");
   meta.className = "spotify-modern-widget-meta";
