@@ -576,7 +576,8 @@ var lastStateUpdatedAt = 0;
 async function loadCachedState(userId) {
   const session = getSession(userId);
   try {
-    session.lastState = await spindle.userStorage.getJson("last_state.json", { userId });
+    const cachedState = await spindle.userStorage.getJson("last_state.json", { userId });
+    session.lastState = cachedState ? { ...cachedState, albumArtUrl: null } : null;
     session.lastStateUpdatedAt = 0;
   } catch {
     session.lastState = null;
