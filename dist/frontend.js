@@ -4676,6 +4676,7 @@ function setup(ctx) {
   legacyWidgetVisual.appendChild(widgetArt.el);
   widgetContent.appendChild(legacyWidgetVisual);
   let modernWidgetExpanded = false;
+  const WIDGET_EDGE_PAD = 12;
   const modernWidget = createModernWidgetPlayerUI(sendToBackend, () => tab.activate(), () => setModernWidgetExpanded(false));
   widgetContent.appendChild(modernWidget.root);
   widget.root.appendChild(widgetContent);
@@ -4692,12 +4693,19 @@ function setup(ctx) {
       height: Math.max(420, Math.min(520, window.innerHeight - 24))
     };
   }
+  function getWidgetLayoutSize(expanded = modernWidgetExpanded) {
+    if (currentMiniPlayerStyle === "modern") {
+      return expanded ? getModernExpandedSize() : { width: currentWidgetSize, height: currentWidgetSize };
+    }
+    return { width: currentWidgetSize, height: currentWidgetSize };
+  }
   function setModernWidgetExpanded(expanded) {
     modernWidgetExpanded = expanded && currentMiniPlayerStyle === "modern";
-    modernWidget.setExpanded(modernWidgetExpanded);
     miniPlayer.hide();
+    clampWidgetPosition(getWidgetLayoutSize(modernWidgetExpanded));
+    modernWidget.setExpanded(modernWidgetExpanded);
     applyWidgetStyle();
-    requestAnimationFrame(clampWidgetPosition);
+    requestAnimationFrame(() => clampWidgetPosition(getWidgetLayoutSize()));
   }
   function applyWidgetStyle() {
     widget.root.style.touchAction = "none";
@@ -4705,7 +4713,7 @@ function setup(ctx) {
     widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     modernWidget.setCollapsedSize(currentWidgetSize);
     if (currentMiniPlayerStyle === "modern") {
-      const size = modernWidgetExpanded ? getModernExpandedSize() : { width: currentWidgetSize, height: currentWidgetSize };
+      const size = getWidgetLayoutSize();
       widgetContent.classList.add("spotify-float-widget-modern-mode");
       legacyWidgetVisual.style.display = "none";
       modernWidget.root.style.display = "block";
@@ -4737,20 +4745,26 @@ function setup(ctx) {
   if (savedX !== undefined && savedY !== undefined) {
     widget.moveTo(savedX, savedY);
   }
-  function clampWidgetPosition() {
+  function clampWidgetPosition(size = getWidgetLayoutSize()) {
     const pos = widget.getPosition();
-    const pad = 12;
-    const rect = widget.root.getBoundingClientRect();
-    const maxX = window.innerWidth - rect.width - pad;
-    const maxY = window.innerHeight - rect.height - pad;
-    const clampedX = Math.max(pad, Math.min(pos.x, maxX));
-    const clampedY = Math.max(pad, Math.min(pos.y, maxY));
+    const maxX = window.innerWidth - size.width - WIDGET_EDGE_PAD;
+    const maxY = window.innerHeight - size.height - WIDGET_EDGE_PAD;
+    const clampedX = Math.max(WIDGET_EDGE_PAD, Math.min(pos.x, maxX));
+    const clampedY = Math.max(WIDGET_EDGE_PAD, Math.min(pos.y, maxY));
     if (clampedX !== pos.x || clampedY !== pos.y) {
       widget.moveTo(clampedX, clampedY);
     }
   }
-  window.addEventListener("resize", clampWidgetPosition);
-  cleanups.push(() => window.removeEventListener("resize", clampWidgetPosition));
+  function handleWidgetViewportResize() {
+    if (currentMiniPlayerStyle === "modern" && modernWidgetExpanded) {
+      applyWidgetStyle();
+      requestAnimationFrame(() => clampWidgetPosition(getWidgetLayoutSize()));
+      return;
+    }
+    clampWidgetPosition();
+  }
+  window.addEventListener("resize", handleWidgetViewportResize);
+  cleanups.push(() => window.removeEventListener("resize", handleWidgetViewportResize));
   const miniPlayer = createMiniPlayerUI(sendToBackend, () => tab.activate(), () => {
     const rect = widget.root.getBoundingClientRect();
     return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
@@ -4804,7 +4818,7 @@ function setup(ctx) {
     }
   });
   widgetContent.addEventListener("pointerup", () => {
-    requestAnimationFrame(clampWidgetPosition);
+    requestAnimationFrame(() => clampWidgetPosition());
   });
   widgetContent.addEventListener("click", (e) => {
     if (didDrag) {
@@ -5005,7 +5019,7 @@ function setup(ctx) {
         updateWidget(currentState);
         if (currentMiniPlayerStyle === "modern" && modernWidgetExpanded && hadPlayback !== !!currentState) {
           applyWidgetStyle();
-          requestAnimationFrame(clampWidgetPosition);
+          requestAnimationFrame(() => clampWidgetPosition());
         }
         scheduleTrackEndRefresh(currentState);
         const artUrl = getTrackScopedArtUrl(currentState?.albumArtUrl ?? null, currentState?.trackUri);
