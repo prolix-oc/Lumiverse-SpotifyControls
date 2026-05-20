@@ -160,15 +160,12 @@ export function createModernWidgetPlayerUI(
 
   const compactProgress = document.createElement("div");
   compactProgress.className = "spotify-modern-widget-compact-progress";
-  const compactProgressFill = document.createElement("div");
-  compactProgressFill.className = "spotify-modern-widget-compact-progress-fill";
-  compactProgress.appendChild(compactProgressFill);
 
   compactOverlay.appendChild(compactStatus);
-  compactOverlay.appendChild(compactProgress);
   compact.appendChild(compactArt.el);
   compact.appendChild(compactFallback);
   compact.appendChild(compactOverlay);
+  compact.appendChild(compactProgress);
 
   const expanded = document.createElement("div");
   expanded.className = "spotify-modern-widget-expanded";
@@ -398,6 +395,11 @@ export function createModernWidgetPlayerUI(
     return Math.min(lastProgressMs + Math.max(0, Date.now() - lastUpdateTime), currentDuration || Infinity);
   }
 
+  function setCompactProgress(pct: number, visible: boolean) {
+    compactProgress.style.setProperty("--spotify-modern-widget-compact-progress", `${Math.max(0, Math.min(100, pct))}%`);
+    compactProgress.style.opacity = visible ? "1" : "0";
+  }
+
   function clearLyricsTrack() {
     stopAutoScrollTracking();
     lyricsTrack.innerHTML = "";
@@ -559,7 +561,7 @@ export function createModernWidgetPlayerUI(
     const interpolated = getInterpolatedProgressMs();
     const pct = currentDuration > 0 ? (interpolated / currentDuration) * 100 : 0;
     progressFill.style.width = `${pct}%`;
-    compactProgressFill.style.width = `${pct}%`;
+    setCompactProgress(pct, true);
     progressTime.textContent = formatTime(interpolated);
     updateActiveLyricLine();
     animFrameId = requestAnimationFrame(tickProgress);
@@ -608,7 +610,7 @@ export function createModernWidgetPlayerUI(
       lyricsSection.style.display = "none";
       controls.style.display = "none";
       volumeRow.style.display = "none";
-      compactProgressFill.style.width = "0%";
+      setCompactProgress(0, false);
       renderCompactArt(null);
       renderHeroArt(null);
       syncedLyricsModel.setPlayback(null);
@@ -653,7 +655,7 @@ export function createModernWidgetPlayerUI(
 
     const pct = playbackState.durationMs > 0 ? (playbackState.progressMs / playbackState.durationMs) * 100 : 0;
     progressFill.style.width = `${pct}%`;
-    compactProgressFill.style.width = `${pct}%`;
+    setCompactProgress(pct, playbackState.durationMs > 0);
     progressTime.textContent = formatTime(playbackState.progressMs);
     durationTime.textContent = formatTime(playbackState.durationMs);
 

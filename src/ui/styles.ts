@@ -645,20 +645,25 @@ export const PANEL_CSS = `
 }
 
 .spotify-modern-widget-compact-progress {
-  align-self: stretch;
-  margin-top: auto;
-  height: 4px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-
-.spotify-modern-widget-compact-progress-fill {
-  width: 0;
-  height: 100%;
-  border-radius: inherit;
-  background: rgba(255, 255, 255, 0.72);
+  --spotify-modern-widget-compact-progress: 0%;
+  position: absolute;
+  inset: 4px;
+  z-index: 2;
+  border-radius: max(16px, calc(var(--spotify-modern-widget-collapsed-size) * 0.26));
+  padding: 2px;
+  pointer-events: none;
+  background:
+    conic-gradient(
+      from -90deg,
+      rgba(255, 255, 255, 0.88) 0 var(--spotify-modern-widget-compact-progress),
+      rgba(255, 255, 255, 0.16) var(--spotify-modern-widget-compact-progress) 100%
+    );
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  transition: opacity 180ms ease, background 180ms ease;
 }
 
 .spotify-modern-widget-expanded {
