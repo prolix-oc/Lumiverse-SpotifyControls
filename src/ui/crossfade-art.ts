@@ -37,8 +37,8 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
   imgB.className = "spotify-crossfade-img";
   imgA.alt = "";
   imgB.alt = "";
-  imgA.loading = "lazy";
-  imgB.loading = "lazy";
+  imgA.loading = "eager";
+  imgB.loading = "eager";
   imgA.decoding = "async";
   imgB.decoding = "async";
   imgA.style.visibility = "hidden";
@@ -81,13 +81,13 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
       return;
     }
 
-    // First load: set directly on the active (visible) layer so there's no
-    // empty image showing alt text. Keep container hidden until loaded.
+    // First load: make the container eligible for loading, but keep the img
+    // layer hidden until it has decoded successfully.
     if (!hasLoadedOnce) {
+      el.style.display = "";
       activeImg.onload = () => {
         hasLoadedOnce = true;
         activeImg.style.visibility = "visible";
-        el.style.display = "";
       };
       activeImg.onerror = () => {
         currentUrl = null;
@@ -98,7 +98,6 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
       if (activeImg.complete && activeImg.naturalWidth > 0) {
         hasLoadedOnce = true;
         activeImg.style.visibility = "visible";
-        el.style.display = "";
       }
       return;
     }

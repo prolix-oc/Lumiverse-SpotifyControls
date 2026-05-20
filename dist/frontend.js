@@ -2220,8 +2220,8 @@ function createCrossfadeArt(className) {
   imgB.className = "spotify-crossfade-img";
   imgA.alt = "";
   imgB.alt = "";
-  imgA.loading = "lazy";
-  imgB.loading = "lazy";
+  imgA.loading = "eager";
+  imgB.loading = "eager";
   imgA.decoding = "async";
   imgB.decoding = "async";
   imgA.style.visibility = "hidden";
@@ -2257,10 +2257,10 @@ function createCrossfadeArt(className) {
       return;
     }
     if (!hasLoadedOnce) {
+      el.style.display = "";
       activeImg.onload = () => {
         hasLoadedOnce = true;
         activeImg.style.visibility = "visible";
-        el.style.display = "";
       };
       activeImg.onerror = () => {
         currentUrl = null;
@@ -2271,7 +2271,6 @@ function createCrossfadeArt(className) {
       if (activeImg.complete && activeImg.naturalWidth > 0) {
         hasLoadedOnce = true;
         activeImg.style.visibility = "visible";
-        el.style.display = "";
       }
       return;
     }
