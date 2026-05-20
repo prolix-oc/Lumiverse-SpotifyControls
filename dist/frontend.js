@@ -2208,16 +2208,19 @@ function getTrackScopedArtUrl(url, trackUri) {
 function createCrossfadeArt(className) {
   const el = document.createElement("div");
   el.className = `${className} spotify-crossfade-art`;
+  el.style.display = "none";
   const imgA = document.createElement("img");
   const imgB = document.createElement("img");
   imgA.className = "spotify-crossfade-img";
   imgB.className = "spotify-crossfade-img";
-  imgA.alt = "Album art";
-  imgB.alt = "Album art";
+  imgA.alt = "";
+  imgB.alt = "";
   imgA.loading = "lazy";
   imgB.loading = "lazy";
   imgA.decoding = "async";
   imgB.decoding = "async";
+  imgA.style.visibility = "hidden";
+  imgB.style.visibility = "hidden";
   imgA.style.opacity = "1";
   imgB.style.opacity = "0";
   el.appendChild(imgA);
@@ -2230,6 +2233,7 @@ function createCrossfadeArt(className) {
     img.onload = null;
     img.onerror = null;
     img.removeAttribute("src");
+    img.style.visibility = "hidden";
   }
   function hideArt() {
     el.style.display = "none";
@@ -2243,12 +2247,14 @@ function createCrossfadeArt(className) {
     if (!url) {
       resetImage(activeImg);
       resetImage(inactiveImg);
+      hasLoadedOnce = false;
       hideArt();
       return;
     }
     if (!hasLoadedOnce) {
       activeImg.onload = () => {
         hasLoadedOnce = true;
+        activeImg.style.visibility = "visible";
         el.style.display = "";
       };
       activeImg.onerror = () => {
@@ -2259,12 +2265,14 @@ function createCrossfadeArt(className) {
       activeImg.src = url;
       if (activeImg.complete && activeImg.naturalWidth > 0) {
         hasLoadedOnce = true;
+        activeImg.style.visibility = "visible";
         el.style.display = "";
       }
       return;
     }
     el.style.display = "";
     inactiveImg.onload = () => {
+      inactiveImg.style.visibility = "visible";
       inactiveImg.style.opacity = "1";
       activeImg.style.opacity = "0";
       const tmp = activeImg;
@@ -2278,6 +2286,7 @@ function createCrossfadeArt(className) {
     };
     inactiveImg.src = url;
     if (inactiveImg.complete && inactiveImg.naturalWidth > 0) {
+      inactiveImg.style.visibility = "visible";
       inactiveImg.style.opacity = "1";
       activeImg.style.opacity = "0";
       const tmp = activeImg;

@@ -29,17 +29,20 @@ export function getTrackScopedArtUrl(
 export function createCrossfadeArt(className: string): CrossfadeArt {
   const el = document.createElement("div");
   el.className = `${className} spotify-crossfade-art`;
+  el.style.display = "none";
 
   const imgA = document.createElement("img");
   const imgB = document.createElement("img");
   imgA.className = "spotify-crossfade-img";
   imgB.className = "spotify-crossfade-img";
-  imgA.alt = "Album art";
-  imgB.alt = "Album art";
+  imgA.alt = "";
+  imgB.alt = "";
   imgA.loading = "lazy";
   imgB.loading = "lazy";
   imgA.decoding = "async";
   imgB.decoding = "async";
+  imgA.style.visibility = "hidden";
+  imgB.style.visibility = "hidden";
 
   // A starts visible
   imgA.style.opacity = "1";
@@ -57,6 +60,7 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
     img.onload = null;
     img.onerror = null;
     img.removeAttribute("src");
+    img.style.visibility = "hidden";
   }
 
   function hideArt() {
@@ -72,6 +76,7 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
     if (!url) {
       resetImage(activeImg);
       resetImage(inactiveImg);
+      hasLoadedOnce = false;
       hideArt();
       return;
     }
@@ -81,6 +86,7 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
     if (!hasLoadedOnce) {
       activeImg.onload = () => {
         hasLoadedOnce = true;
+        activeImg.style.visibility = "visible";
         el.style.display = "";
       };
       activeImg.onerror = () => {
@@ -91,6 +97,7 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
       activeImg.src = url;
       if (activeImg.complete && activeImg.naturalWidth > 0) {
         hasLoadedOnce = true;
+        activeImg.style.visibility = "visible";
         el.style.display = "";
       }
       return;
@@ -100,6 +107,7 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
 
     // Subsequent loads: crossfade via the inactive layer
     inactiveImg.onload = () => {
+      inactiveImg.style.visibility = "visible";
       inactiveImg.style.opacity = "1";
       activeImg.style.opacity = "0";
       const tmp = activeImg;
@@ -114,6 +122,7 @@ export function createCrossfadeArt(className: string): CrossfadeArt {
     inactiveImg.src = url;
 
     if (inactiveImg.complete && inactiveImg.naturalWidth > 0) {
+      inactiveImg.style.visibility = "visible";
       inactiveImg.style.opacity = "1";
       activeImg.style.opacity = "0";
       const tmp = activeImg;
