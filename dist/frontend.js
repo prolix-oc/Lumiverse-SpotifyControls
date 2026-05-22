@@ -4925,8 +4925,9 @@ function setup(ctx) {
       didDrag = false;
       return;
     }
-    e.preventDefault();
     if (!didDrag) {
+      if (e.cancelable)
+        e.preventDefault();
       if (currentMiniPlayerStyle === "modern") {
         if (!modernWidgetExpanded)
           setModernWidgetExpanded(true);

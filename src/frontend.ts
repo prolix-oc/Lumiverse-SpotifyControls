@@ -700,12 +700,11 @@ export function setup(ctx: SpindleFrontendContext) {
       return;
     }
 
-    // Prevent synthetic click/mouse events from reaching elements underneath
-    // the floating widget when we handle the tap ourselves.
-    e.preventDefault();
-
     // Since we block the browser's click generation, handle taps here
     if (!didDrag) {
+      // Prevent synthetic click/mouse events from reaching elements underneath
+      // the floating widget when we handle the tap ourselves.
+      if (e.cancelable) e.preventDefault();
       if (currentMiniPlayerStyle === "modern") {
         if (!modernWidgetExpanded) setModernWidgetExpanded(true);
       } else {

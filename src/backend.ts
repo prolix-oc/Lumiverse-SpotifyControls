@@ -871,7 +871,7 @@ spindle.registerTool({
   parameters: {
     type: "object",
     properties: {
-      query: { type: "string", description: "Search query — a song/artist name, or mood/atmosphere descriptors like 'dark ambient mysterious', 'upbeat jazz cafe', 'epic orchestral battle'" },
+      query: { type: "string", description: "Either a specific title to find (e.g. 'Bohemian Rhapsody Queen'), or 2-4 descriptors derived from the current scene when scoring an unnamed moment. When deriving from the scene, ground yourself in the most recent beats: the texture of the action, the genre or period the setting suggests, the emotional pitch, what's happening between characters. Aim for descriptors that wouldn't transfer cleanly to a different scene — if they would, you're reaching for stock phrasing rather than reading what's in front of you." },
       mode: { type: "string", enum: ["tracks", "playlist"], description: "Search mode: 'playlist' finds curated playlists (best for mood/atmosphere), 'tracks' finds individual songs (best for specific songs). Defaults to 'playlist'." },
     },
     required: ["query"],
@@ -900,7 +900,7 @@ spindle.registerTool({
     properties: {
       mood: {
         type: "string",
-        description: "Comma-separated mood/atmosphere descriptors matching the scene's emotional tone. Be specific and faithful to the scene — e.g. 'romantic, tender, gentle' for a love scene; 'playful, lighthearted, warm' for a meet-cute or comedic beat; 'melancholic, bittersweet, nostalgic' for a farewell; 'dark, brooding, ominous' for menace; 'chill, mellow, dreamy' for a quiet moment. Avoid defaulting to 'epic' or 'cinematic' — only use those for genuinely grand, sweeping moments like battles or revelations.",
+        description: "2-3 lowercase, comma-separated descriptors derived from the current scene. Before choosing, ground yourself in the most recent beats: the pace, the closeness or distance between characters, the emotional register of the dialogue, the physical setting, what just shifted. Pick words that describe *this* moment's texture — not the genre of moment it resembles. If your descriptors would fit equally well over a wholly different scene, you're describing the trope rather than the music this scene needs; observe again and reach for something more specific.",
       },
     },
     required: [],
