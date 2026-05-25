@@ -818,6 +818,17 @@ spindle.registerMacro({
 });
 
 spindle.registerMacro({
+  name: "spotify_track_name",
+  category: "extension:spotify_controls",
+  description: "Returns the track name of the currently playing Spotify track",
+  returnType: "string",
+  handler: (async () => {
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
+    return state?.trackName || "";
+  }) as any,
+});
+
+spindle.registerMacro({
   name: "spotify_artists",
   category: "extension:spotify_controls",
   description: "Returns the artist(s) of the currently playing Spotify track",
@@ -898,6 +909,7 @@ spindle.registerMacro({
 function pushPlaybackMacros(state: PlaybackState | null) {
   if (!state) {
     spindle.updateMacroValue("spotify_now_playing", "Nothing playing");
+    spindle.updateMacroValue("spotify_track_name", "");
     spindle.updateMacroValue("spotify_artists", "");
     spindle.updateMacroValue("spotify_album_name", "");
     spindle.updateMacroValue("spotify_album_art", "");
@@ -905,6 +917,7 @@ function pushPlaybackMacros(state: PlaybackState | null) {
     return;
   }
   spindle.updateMacroValue("spotify_now_playing", `${state.trackName} by ${state.artistName}`);
+  spindle.updateMacroValue("spotify_track_name", state.trackName || "");
   spindle.updateMacroValue("spotify_artists", state.artistName || "");
   spindle.updateMacroValue("spotify_album_name", state.albumName || "");
   spindle.updateMacroValue("spotify_album_art", state.albumArtUrl || "");
