@@ -233,6 +233,25 @@ async function transferPlayback(deviceId, userId) {
   }, userId);
 }
 var LRCLIB_API = "https://lrclib.net/api";
+function normalizeInstrumental(result) {
+  if (result.instrumental)
+    return result;
+  const plain = result.plainLyrics?.trim().toLowerCase();
+  if (plain === "instrumental") {
+    return { plainLyrics: null, syncedLyrics: null, instrumental: true };
+  }
+  if (result.syncedLyrics) {
+    const lines = result.syncedLyrics.split(`
+`).filter((l) => l.trim());
+    if (lines.length === 1) {
+      const text = lines[0].replace(/\[\d+:\d+[.:]\d+\]\s*/g, "").trim().toLowerCase();
+      if (text === "instrumental") {
+        return { plainLyrics: null, syncedLyrics: null, instrumental: true };
+      }
+    }
+  }
+  return result;
+}
 async function getLyrics(trackName, artistName, albumName, durationSec, _userId) {
   const params = new URLSearchParams({
     track_name: trackName,
@@ -247,11 +266,11 @@ async function getLyrics(trackName, artistName, albumName, durationSec, _userId)
     });
     if (res.status === 200) {
       const data = JSON.parse(res.body);
-      return {
+      return normalizeInstrumental({
         plainLyrics: data.plainLyrics || null,
         syncedLyrics: data.syncedLyrics || null,
         instrumental: data.instrumental || false
-      };
+      });
     }
   } catch {}
   try {
@@ -266,11 +285,11 @@ async function getLyrics(trackName, artistName, albumName, durationSec, _userId)
       const results = JSON.parse(res.body);
       if (results.length > 0) {
         const best = results[0];
-        return {
+        return normalizeInstrumental({
           plainLyrics: best.plainLyrics || null,
           syncedLyrics: best.syncedLyrics || null,
           instrumental: best.instrumental || false
-        };
+        });
       }
     }
   } catch {}
@@ -597,6 +616,7 @@ async function cacheState(userId, state) {
   } else {
     await spindle.userStorage.delete("last_state.json", userId).catch(() => {});
   }
+  pushPlaybackMacros(state);
 }
 spindle.permissions.onChanged(({ permission, granted }) => {
   if (permission !== "cors_proxy")
@@ -964,6 +984,7 @@ async function getLyricsForCurrentTrack(userId) {
     session.cachedLyrics = { trackUri: state.trackUri, data };
     if (activeUserId2 === resolvedUserId)
       syncActiveUserState(resolvedUserId);
+    pushLyricsMacros(data);
     return data;
   } catch {
     return null;
@@ -1040,41 +1061,56 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns the currently playing Spotify track",
   returnType: "string",
-  handler: async () => {
-    const state = isConnected() ? await getCurrentPlayback().catch(() => null) : null;
-    if (!state)
-      return "Nothing playing";
-    return `${state.artistName} - ${state.trackName} (${state.albumName})`;
-  }
+  handler: "return 'Nothing playing'"
 });
 spindle.registerMacro({
   name: "spotify_album_art",
   category: "extension:spotify_controls",
   description: "Returns the URL of the currently playing track's album art",
   returnType: "string",
-  handler: async () => {
-    const state = isConnected() ? await getCurrentPlayback().catch(() => null) : null;
-    return state?.albumArtUrl || "";
-  }
+  handler: "return ''"
+});
+spindle.registerMacro({
+  name: "spotify_is_playing",
+  category: "extension:spotify_controls",
+  description: "Returns whether Spotify is currently playing a track",
+  returnType: "boolean",
+  handler: "return false"
 });
 spindle.registerMacro({
   name: "spotify_lyrics",
   category: "extension:spotify_controls",
   description: "Returns the full lyrics of the currently playing Spotify track",
   returnType: "string",
-  handler: async () => {
-    try {
-      const lyrics = await getLyricsForCurrentTrack();
-      if (!lyrics)
-        return "No lyrics available";
-      if (lyrics.instrumental)
-        return "[Instrumental]";
-      return lyrics.plainLyrics || "No lyrics available";
-    } catch {
-      return "No lyrics available";
-    }
-  }
+  handler: "return 'No lyrics available'"
 });
+spindle.registerMacro({
+  name: "spotify_has_lyrics",
+  category: "extension:spotify_controls",
+  description: "Returns whether the currently playing Spotify track has lyrics available",
+  returnType: "boolean",
+  handler: "return false"
+});
+function pushPlaybackMacros(state) {
+  if (!state) {
+    spindle.updateMacroValue("spotify_now_playing", "Nothing playing");
+    spindle.updateMacroValue("spotify_album_art", "");
+    spindle.updateMacroValue("spotify_is_playing", "false");
+    return;
+  }
+  spindle.updateMacroValue("spotify_now_playing", `${state.artistName} - ${state.trackName} (${state.albumName})`);
+  spindle.updateMacroValue("spotify_album_art", state.albumArtUrl || "");
+  spindle.updateMacroValue("spotify_is_playing", String(state.isPlaying));
+}
+function pushLyricsMacros(lyrics) {
+  if (!lyrics || lyrics.instrumental) {
+    spindle.updateMacroValue("spotify_lyrics", lyrics?.instrumental ? "[Instrumental]" : "No lyrics available");
+    spindle.updateMacroValue("spotify_has_lyrics", "false");
+    return;
+  }
+  spindle.updateMacroValue("spotify_lyrics", lyrics.plainLyrics || "No lyrics available");
+  spindle.updateMacroValue("spotify_has_lyrics", String(!!(lyrics.syncedLyrics || lyrics.plainLyrics)));
+}
 var TOOL_NAMES = [
   "spotify_search",
   "spotify_search_similar",

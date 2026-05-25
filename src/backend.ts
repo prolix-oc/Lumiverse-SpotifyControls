@@ -271,6 +271,7 @@ async function cacheState(userId: string, state: PlaybackState | null): Promise<
   } else {
     await spindle.userStorage.delete("last_state.json", userId).catch(() => {});
   }
+  pushPlaybackMacros(state);
 }
 
 // ─── Permission-aware polling ────────────────────────────────────────────
@@ -719,6 +720,7 @@ async function getLyricsForCurrentTrack(userId?: string): Promise<spotify.Lyrics
     );
     session.cachedLyrics = { trackUri: state.trackUri, data };
     if (activeUserId === resolvedUserId) syncActiveUserState(resolvedUserId);
+    pushLyricsMacros(data);
     return data;
   } catch {
     return null;
@@ -808,11 +810,7 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns the currently playing Spotify track",
   returnType: "string",
-  handler: (async () => {
-    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
-    if (!state) return "Nothing playing";
-    return `${state.artistName} - ${state.trackName} (${state.albumName})`;
-  }) as any,
+  handler: "return 'Nothing playing'",
 });
 
 spindle.registerMacro({
@@ -820,10 +818,7 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns the URL of the currently playing track's album art",
   returnType: "string",
-  handler: (async () => {
-    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
-    return state?.albumArtUrl || "";
-  }) as any,
+  handler: "return ''",
 });
 
 spindle.registerMacro({
@@ -831,10 +826,7 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns whether Spotify is currently playing a track",
   returnType: "boolean",
-  handler: (async () => {
-    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
-    return state?.isPlaying ?? false;
-  }) as any,
+  handler: "return false",
 });
 
 spindle.registerMacro({
@@ -842,16 +834,7 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns the full lyrics of the currently playing Spotify track",
   returnType: "string",
-  handler: (async () => {
-    try {
-      const lyrics = await getLyricsForCurrentTrack();
-      if (!lyrics) return "No lyrics available";
-      if (lyrics.instrumental) return "[Instrumental]";
-      return lyrics.plainLyrics || "No lyrics available";
-    } catch {
-      return "No lyrics available";
-    }
-  }) as any,
+  handler: "return 'No lyrics available'",
 });
 
 spindle.registerMacro({
@@ -859,16 +842,30 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns whether the currently playing Spotify track has lyrics available",
   returnType: "boolean",
-  handler: (async () => {
-    try {
-      const lyrics = await getLyricsForCurrentTrack();
-      if (!lyrics || lyrics.instrumental) return false;
-      return !!(lyrics.syncedLyrics || lyrics.plainLyrics);
-    } catch {
-      return false;
-    }
-  }) as any,
+  handler: "return false",
 });
+
+function pushPlaybackMacros(state: PlaybackState | null) {
+  if (!state) {
+    spindle.updateMacroValue("spotify_now_playing", "Nothing playing");
+    spindle.updateMacroValue("spotify_album_art", "");
+    spindle.updateMacroValue("spotify_is_playing", "false");
+    return;
+  }
+  spindle.updateMacroValue("spotify_now_playing", `${state.artistName} - ${state.trackName} (${state.albumName})`);
+  spindle.updateMacroValue("spotify_album_art", state.albumArtUrl || "");
+  spindle.updateMacroValue("spotify_is_playing", String(state.isPlaying));
+}
+
+function pushLyricsMacros(lyrics: spotify.LyricsData | null) {
+  if (!lyrics || lyrics.instrumental) {
+    spindle.updateMacroValue("spotify_lyrics", lyrics?.instrumental ? "[Instrumental]" : "No lyrics available");
+    spindle.updateMacroValue("spotify_has_lyrics", "false");
+    return;
+  }
+  spindle.updateMacroValue("spotify_lyrics", lyrics.plainLyrics || "No lyrics available");
+  spindle.updateMacroValue("spotify_has_lyrics", String(!!(lyrics.syncedLyrics || lyrics.plainLyrics)));
+}
 
 // ─── LLM Tools ───────────────────────────────────────────────────────────
 
