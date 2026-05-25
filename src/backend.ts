@@ -813,7 +813,29 @@ spindle.registerMacro({
   handler: (async () => {
     const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
     if (!state) return "Nothing playing";
-    return `${state.artistName} - ${state.trackName} (${state.albumName})`;
+    return `${state.trackName} by ${state.artistName}`;
+  }) as any,
+});
+
+spindle.registerMacro({
+  name: "spotify_artists",
+  category: "extension:spotify_controls",
+  description: "Returns the artist(s) of the currently playing Spotify track",
+  returnType: "string",
+  handler: (async () => {
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
+    return state?.artistName || "";
+  }) as any,
+});
+
+spindle.registerMacro({
+  name: "spotify_album_name",
+  category: "extension:spotify_controls",
+  description: "Returns the album name of the currently playing Spotify track",
+  returnType: "string",
+  handler: (async () => {
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
+    return state?.albumName || "";
   }) as any,
 });
 
@@ -876,11 +898,15 @@ spindle.registerMacro({
 function pushPlaybackMacros(state: PlaybackState | null) {
   if (!state) {
     spindle.updateMacroValue("spotify_now_playing", "Nothing playing");
+    spindle.updateMacroValue("spotify_artists", "");
+    spindle.updateMacroValue("spotify_album_name", "");
     spindle.updateMacroValue("spotify_album_art", "");
     spindle.updateMacroValue("spotify_is_playing", "false");
     return;
   }
-  spindle.updateMacroValue("spotify_now_playing", `${state.artistName} - ${state.trackName} (${state.albumName})`);
+  spindle.updateMacroValue("spotify_now_playing", `${state.trackName} by ${state.artistName}`);
+  spindle.updateMacroValue("spotify_artists", state.artistName || "");
+  spindle.updateMacroValue("spotify_album_name", state.albumName || "");
   spindle.updateMacroValue("spotify_album_art", state.albumArtUrl || "");
   spindle.updateMacroValue("spotify_is_playing", String(state.isPlaying));
 }
