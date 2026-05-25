@@ -810,7 +810,11 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns the currently playing Spotify track",
   returnType: "string",
-  handler: "return 'Nothing playing'",
+  handler: (async () => {
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
+    if (!state) return "Nothing playing";
+    return `${state.artistName} - ${state.trackName} (${state.albumName})`;
+  }) as any,
 });
 
 spindle.registerMacro({
@@ -818,7 +822,10 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns the URL of the currently playing track's album art",
   returnType: "string",
-  handler: "return ''",
+  handler: (async () => {
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
+    return state?.albumArtUrl || "";
+  }) as any,
 });
 
 spindle.registerMacro({
@@ -826,7 +833,11 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns whether Spotify is currently playing a track",
   returnType: "boolean",
-  handler: "return false",
+  volatile: true,
+  handler: (async () => {
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
+    return state?.isPlaying ?? false;
+  }) as any,
 });
 
 spindle.registerMacro({
@@ -834,7 +845,16 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns the full lyrics of the currently playing Spotify track",
   returnType: "string",
-  handler: "return 'No lyrics available'",
+  handler: (async () => {
+    try {
+      const lyrics = await getLyricsForCurrentTrack();
+      if (!lyrics) return "No lyrics available";
+      if (lyrics.instrumental) return "[Instrumental]";
+      return lyrics.plainLyrics || "No lyrics available";
+    } catch {
+      return "No lyrics available";
+    }
+  }) as any,
 });
 
 spindle.registerMacro({
@@ -842,7 +862,15 @@ spindle.registerMacro({
   category: "extension:spotify_controls",
   description: "Returns whether the currently playing Spotify track has lyrics available",
   returnType: "boolean",
-  handler: "return false",
+  handler: (async () => {
+    try {
+      const lyrics = await getLyricsForCurrentTrack();
+      if (!lyrics || lyrics.instrumental) return false;
+      return !!(lyrics.syncedLyrics || lyrics.plainLyrics);
+    } catch {
+      return false;
+    }
+  }) as any,
 });
 
 function pushPlaybackMacros(state: PlaybackState | null) {
