@@ -341,6 +341,24 @@ export interface LyricsData {
   instrumental: boolean;
 }
 
+function normalizeInstrumental(result: LyricsData): LyricsData {
+  if (result.instrumental) return result;
+  const plain = result.plainLyrics?.trim().toLowerCase();
+  if (plain === "instrumental") {
+    return { plainLyrics: null, syncedLyrics: null, instrumental: true };
+  }
+  if (result.syncedLyrics) {
+    const lines = result.syncedLyrics.split("\n").filter((l) => l.trim());
+    if (lines.length === 1) {
+      const text = lines[0].replace(/\[\d+:\d+[.:]\d+\]\s*/g, "").trim().toLowerCase();
+      if (text === "instrumental") {
+        return { plainLyrics: null, syncedLyrics: null, instrumental: true };
+      }
+    }
+  }
+  return result;
+}
+
 export async function getLyrics(
   trackName: string,
   artistName: string,
@@ -364,11 +382,11 @@ export async function getLyrics(
 
     if (res.status === 200) {
       const data = JSON.parse(res.body);
-      return {
+      return normalizeInstrumental({
         plainLyrics: data.plainLyrics || null,
         syncedLyrics: data.syncedLyrics || null,
         instrumental: data.instrumental || false,
-      };
+      });
     }
   } catch {}
 
@@ -386,11 +404,11 @@ export async function getLyrics(
       const results = JSON.parse(res.body);
       if (results.length > 0) {
         const best = results[0];
-        return {
+        return normalizeInstrumental({
           plainLyrics: best.plainLyrics || null,
           syncedLyrics: best.syncedLyrics || null,
           instrumental: best.instrumental || false,
-        };
+        });
       }
     }
   } catch {}

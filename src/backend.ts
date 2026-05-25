@@ -827,6 +827,17 @@ spindle.registerMacro({
 });
 
 spindle.registerMacro({
+  name: "spotify_is_playing",
+  category: "extension:spotify_controls",
+  description: "Returns whether Spotify is currently playing a track",
+  returnType: "boolean",
+  handler: (async () => {
+    const state = spotify.isConnected() ? await spotify.getCurrentPlayback().catch(() => null) : null;
+    return state?.isPlaying ?? false;
+  }) as any,
+});
+
+spindle.registerMacro({
   name: "spotify_lyrics",
   category: "extension:spotify_controls",
   description: "Returns the full lyrics of the currently playing Spotify track",
@@ -839,6 +850,22 @@ spindle.registerMacro({
       return lyrics.plainLyrics || "No lyrics available";
     } catch {
       return "No lyrics available";
+    }
+  }) as any,
+});
+
+spindle.registerMacro({
+  name: "spotify_has_lyrics",
+  category: "extension:spotify_controls",
+  description: "Returns whether the currently playing Spotify track has lyrics available",
+  returnType: "boolean",
+  handler: (async () => {
+    try {
+      const lyrics = await getLyricsForCurrentTrack();
+      if (!lyrics || lyrics.instrumental) return false;
+      return !!(lyrics.syncedLyrics || lyrics.plainLyrics);
+    } catch {
+      return false;
     }
   }) as any,
 });
