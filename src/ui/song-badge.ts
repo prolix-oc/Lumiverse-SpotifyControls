@@ -19,8 +19,6 @@ export interface SongBadgeManager {
   decorate(messageId: string): void;
   /** Decorate every currently-mounted message bubble. */
   decorateMounted(): void;
-  /** Whether we already hold at least one snapshot for a message. */
-  hasSnapshots(messageId: string): boolean;
   /** Track which swipe a message is showing so the popover/badge follow it. */
   setActiveSwipe(messageId: string, swipeId: number): void;
   /** Forget a deleted message. */
@@ -429,7 +427,6 @@ export function createSongBadgeManager(
     setMessageSong,
     decorate,
     decorateMounted,
-    hasSnapshots: hasAnySnapshot,
     setActiveSwipe,
     removeMessage,
     reset,

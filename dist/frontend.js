@@ -4938,7 +4938,6 @@ function createSongBadgeManager(ctx, sendToBackend) {
     setMessageSong,
     decorate,
     decorateMounted,
-    hasSnapshots: hasAnySnapshot,
     setActiveSwipe,
     removeMessage,
     reset,
