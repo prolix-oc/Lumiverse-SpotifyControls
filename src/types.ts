@@ -22,7 +22,8 @@ export type FrontendToBackend =
   | { type: "get_widget_prefs" }
   | { type: "save_widget_prefs"; prefs: WidgetPrefs }
   | { type: "get_lyrics" }
-  | { type: "album_colors"; colors: AlbumColors | null };
+  | { type: "album_colors"; colors: AlbumColors | null }
+  | { type: "get_chat_songs"; chatId: string };
 
 // ─── Backend → Frontend messages ─────────────────────────────────────────
 
@@ -36,6 +37,8 @@ export type BackendToFrontend =
   | { type: "devices"; devices: DeviceInfo[] }
   | { type: "widget_prefs"; prefs: WidgetPrefs }
   | { type: "lyrics"; trackUri: string; plainLyrics: string | null; syncedLyrics: string | null; instrumental: boolean }
+  | { type: "chat_songs"; chatId: string; entries: MessageSongEntry[] }
+  | { type: "message_song"; chatId: string; messageId: string; swipeId: number; snapshot: SongSnapshot }
   | { type: "error"; message: string };
 
 // ─── Shared interfaces ──────────────────────────────────────────────────
@@ -55,6 +58,36 @@ export interface PlaybackState {
   deviceName: string | null;
   deviceType: string | null;
   deviceId: string | null;
+}
+
+/**
+ * A frozen snapshot of the Spotify track that was playing at the moment an
+ * assistant message (or one of its swipes) was generated. Persisted per-swipe,
+ * per-message in the message's spindle metadata and surfaced through the corner
+ * badge popover.
+ */
+export interface SongSnapshot {
+  trackName: string;
+  artistName: string;
+  albumName: string;
+  albumArtUrl: string | null;
+  /** Spotify URI, e.g. `spotify:track:xxxx`. Used for quick-play. */
+  trackUri: string;
+  /** Shareable web link, e.g. `https://open.spotify.com/track/xxxx`. */
+  spotifyUrl: string;
+  /** Whether playback was active (vs paused) when captured. */
+  isPlaying: boolean;
+  /** Epoch ms the snapshot was captured. */
+  capturedAt: number;
+}
+
+/** Per-message bundle of snapshots keyed by swipe index. */
+export interface MessageSongEntry {
+  messageId: string;
+  /** The message's active swipe index when the chat was read. */
+  activeSwipe: number;
+  /** Snapshots keyed by swipe index. Sparse — swipes generated with nothing playing are absent. */
+  bySwipe: Record<number, SongSnapshot>;
 }
 
 export interface DeviceInfo {

@@ -963,6 +963,10 @@ spindle.onFrontendMessage(async (raw, userId) => {
         await applyAlbumTheme(msg.colors, userId);
         break;
       }
+      case "get_chat_songs": {
+        await sendChatSongs(msg.chatId, userId);
+        break;
+      }
     }
   } catch (err) {
     send({ type: "error", message: err?.message || "Unknown error" }, userId);
@@ -1002,6 +1006,150 @@ async function applyAlbumTheme(colors, userId) {
     spindle.log.warn(`Album theme: ${err?.message}`);
   }
 }
+var SONG_META_KEY = "spotify_song";
+var SNAPSHOT_FRESH_MS = 8000;
+function trackUriToUrl(uri) {
+  const m = /^spotify:([a-z]+):([A-Za-z0-9]+)/.exec(uri || "");
+  if (m)
+    return `https://open.spotify.com/${m[1]}/${m[2]}`;
+  return uri || "";
+}
+function buildSongSnapshot(state) {
+  if (!state || !state.trackUri || !state.trackName)
+    return null;
+  return {
+    trackName: state.trackName,
+    artistName: state.artistName,
+    albumName: state.albumName,
+    albumArtUrl: state.albumArtUrl ?? null,
+    trackUri: state.trackUri,
+    spotifyUrl: trackUriToUrl(state.trackUri),
+    isPlaying: state.isPlaying,
+    capturedAt: Date.now()
+  };
+}
+async function getSnapshotState(userId) {
+  const session = getSession(userId);
+  if (session.lastState && Date.now() - session.lastStateUpdatedAt <= SNAPSHOT_FRESH_MS) {
+    return session.lastState;
+  }
+  if (isConnected(userId)) {
+    const fresh = await getCurrentPlayback(userId).catch(() => null);
+    if (fresh)
+      return fresh;
+  }
+  return session.lastState;
+}
+function readSpindleMeta(message) {
+  const fromMeta = message.metadata;
+  if (fromMeta && typeof fromMeta === "object")
+    return { ...fromMeta };
+  const fromExtra = message.extra?.spindle_metadata;
+  if (fromExtra && typeof fromExtra === "object")
+    return { ...fromExtra };
+  return {};
+}
+function readSongMap(meta) {
+  const node = meta[SONG_META_KEY];
+  const bySwipe = node?.bySwipe;
+  if (!bySwipe || typeof bySwipe !== "object")
+    return {};
+  const out = {};
+  for (const [k, v] of Object.entries(bySwipe)) {
+    const idx = Number(k);
+    if (Number.isInteger(idx) && v && typeof v === "object")
+      out[idx] = v;
+  }
+  return out;
+}
+function isAssistantMessage(message) {
+  return message.is_user === false && message.name !== "System";
+}
+async function captureSongForMessage(chatId, message, swipeId, userId) {
+  if (!chatId || !message?.id)
+    return;
+  const snapshot = buildSongSnapshot(await getSnapshotState(userId));
+  if (!snapshot)
+    return;
+  const meta = readSpindleMeta(message);
+  const map = readSongMap(meta);
+  map[swipeId] = snapshot;
+  meta[SONG_META_KEY] = { bySwipe: map };
+  try {
+    await spindle.chat.updateMessage(chatId, message.id, { metadata: meta, skipChunkRebuild: true });
+  } catch (err) {
+    spindle.log.warn(`Song capture (update) failed: ${err?.message}`);
+    return;
+  }
+  send({ type: "message_song", chatId, messageId: message.id, swipeId, snapshot }, userId);
+}
+async function realignAfterSwipeDelete(chatId, message, deletedIndex, userId) {
+  if (!message.id)
+    return;
+  const meta = readSpindleMeta(message);
+  const map = readSongMap(meta);
+  if (Object.keys(map).length === 0)
+    return;
+  const next2 = {};
+  for (const [k, v] of Object.entries(map)) {
+    const idx = Number(k);
+    if (idx === deletedIndex)
+      continue;
+    next2[idx > deletedIndex ? idx - 1 : idx] = v;
+  }
+  meta[SONG_META_KEY] = { bySwipe: next2 };
+  try {
+    await spindle.chat.updateMessage(chatId, message.id, { metadata: meta, skipChunkRebuild: true });
+  } catch (err) {
+    spindle.log.warn(`Song capture (realign) failed: ${err?.message}`);
+    return;
+  }
+  await sendChatSongs(chatId, userId).catch(() => {});
+}
+async function sendChatSongs(chatId, userId) {
+  if (!chatId)
+    return;
+  let messages;
+  try {
+    messages = await spindle.chat.getMessages(chatId);
+  } catch (err) {
+    spindle.log.warn(`get_chat_songs failed: ${err?.message}`);
+    return;
+  }
+  const entries = [];
+  for (const m of messages) {
+    if (m.is_user)
+      continue;
+    const map = readSongMap(readSpindleMeta(m));
+    if (Object.keys(map).length === 0)
+      continue;
+    entries.push({ messageId: m.id, activeSwipe: m.swipe_id ?? 0, bySwipe: map });
+  }
+  send({ type: "chat_songs", chatId, entries }, userId);
+}
+spindle.on("MESSAGE_SENT", async (payload, userId) => {
+  const p = payload;
+  const message = p?.message;
+  const chatId = p?.chatId;
+  const uid = userId || activeUserId2;
+  if (!chatId || !message || !uid || !isAssistantMessage(message))
+    return;
+  await captureSongForMessage(chatId, message, message.swipe_id ?? 0, uid).catch(() => {});
+});
+spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
+  const p = payload;
+  const message = p?.message;
+  const chatId = p?.chatId;
+  const uid = userId || activeUserId2;
+  if (!chatId || !message || !uid || !message.id || !isAssistantMessage(message))
+    return;
+  if (p?.action === "added") {
+    const swipeId = typeof p.swipeId === "number" ? p.swipeId : message.swipe_id ?? 0;
+    await captureSongForMessage(chatId, message, swipeId, uid).catch(() => {});
+  } else if (p?.action === "deleted" && typeof p?.swipeId === "number") {
+    await realignAfterSwipeDelete(chatId, message, p.swipeId, uid).catch(() => {});
+  }
+});
 spindle.commands.register([
   {
     id: "play-pause",

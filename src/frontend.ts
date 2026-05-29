@@ -9,6 +9,7 @@ import { createMiniPlayerUI } from "./ui/mini-player";
 import { createModernWidgetPlayerUI } from "./ui/modern-widget-player";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./ui/crossfade-art";
 import { createLyricsUI } from "./ui/lyrics";
+import { createSongBadgeManager } from "./ui/song-badge";
 
 const SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 const MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
@@ -776,6 +777,48 @@ export function setup(ctx: SpindleFrontendContext) {
   );
   cleanups.push(tagUnsub);
 
+  // ─── Per-message "song that was playing" badge ───────────────────────
+
+  const songBadges = createSongBadgeManager(ctx, sendToBackend);
+  cleanups.push(() => songBadges.destroy());
+
+  function requestChatSongs(chatId: string | null) {
+    if (chatId) sendToBackend({ type: "get_chat_songs", chatId });
+  }
+
+  // Load any stored snapshots for the chat we open into.
+  requestChatSongs(ctx.getActiveChat().chatId);
+
+  // Re-load (and clear stale badges) whenever the user switches chats.
+  const chatSwitchUnsub = ctx.events.on("CHAT_SWITCHED", (payload) => {
+    const chatId = (payload as { chatId: string | null })?.chatId ?? null;
+    songBadges.reset();
+    requestChatSongs(chatId);
+  });
+  cleanups.push(chatSwitchUnsub);
+
+  // Decorate assistant bubbles as they render into the virtualized list.
+  const renderUnsub = ctx.events.on("CHARACTER_MESSAGE_RENDERED", (payload) => {
+    const messageId = (payload as { messageId?: string })?.messageId;
+    if (messageId) songBadges.decorate(messageId);
+  });
+  cleanups.push(renderUnsub);
+
+  // Follow the active swipe so the badge/popover reflect the visible version.
+  const swipeUnsub = ctx.events.on("MESSAGE_SWIPED", (payload) => {
+    const p = payload as { message?: { id?: string; swipe_id?: number } };
+    const id = p?.message?.id;
+    if (id) songBadges.setActiveSwipe(id, p.message?.swipe_id ?? 0);
+  });
+  cleanups.push(swipeUnsub);
+
+  // Drop a deleted message's badge + cached snapshots.
+  const deleteUnsub = ctx.events.on("MESSAGE_DELETED", (payload) => {
+    const messageId = (payload as { messageId?: string })?.messageId;
+    if (messageId) songBadges.removeMessage(messageId);
+  });
+  cleanups.push(deleteUnsub);
+
   // ─── Track-end anticipation ─────────────────────────────────────────
   // When a track is playing, schedule a state refresh for when it should
   // end so track transitions are caught quickly without constant polling.
@@ -947,6 +990,14 @@ export function setup(ctx: SpindleFrontendContext) {
         lyricsUI.update(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         lyricsUI.updatePlayback(currentState);
         modernWidget.updateLyrics(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
+        break;
+
+      case "chat_songs":
+        songBadges.setChatSongs(msg.chatId, msg.entries);
+        break;
+
+      case "message_song":
+        songBadges.setMessageSong(msg.chatId, msg.messageId, msg.swipeId, msg.snapshot);
         break;
 
       case "error":

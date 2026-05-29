@@ -1,6 +1,6 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
-import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle, PlaybackState } from "./types";
+import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle, PlaybackState, SongSnapshot, MessageSongEntry } from "./types";
 import * as spotify from "./spotify-api";
 
 // ─── State ───────────────────────────────────────────────────────────────
@@ -691,6 +691,11 @@ spindle.onFrontendMessage(async (raw, userId) => {
         await applyAlbumTheme(msg.colors, userId);
         break;
       }
+
+      case "get_chat_songs": {
+        await sendChatSongs(msg.chatId, userId);
+        break;
+      }
     }
   } catch (err: any) {
     send({ type: "error", message: err?.message || "Unknown error" }, userId);
@@ -746,6 +751,184 @@ async function applyAlbumTheme(colors: AlbumColors | null, userId?: string): Pro
     spindle.log.warn(`Album theme: ${err?.message}`);
   }
 }
+
+// ─── Message song snapshots ────────────────────────────────────────────────
+// Capture the Spotify track that was playing when an assistant message (or one
+// of its swipes) was generated, and persist it per-swipe in the message's
+// spindle metadata. The corner badge popover (frontend) renders from this.
+// Requires the `chat_mutation` permission.
+
+const SONG_META_KEY = "spotify_song";
+const SNAPSHOT_FRESH_MS = 8000;
+
+type MsgLike = {
+  id?: string;
+  is_user?: boolean;
+  name?: string;
+  swipe_id?: number;
+  extra?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+function trackUriToUrl(uri: string): string {
+  // spotify:track:ID -> https://open.spotify.com/track/ID (also episode/show/etc.)
+  const m = /^spotify:([a-z]+):([A-Za-z0-9]+)/.exec(uri || "");
+  if (m) return `https://open.spotify.com/${m[1]}/${m[2]}`;
+  return uri || "";
+}
+
+function buildSongSnapshot(state: PlaybackState | null): SongSnapshot | null {
+  if (!state || !state.trackUri || !state.trackName) return null;
+  return {
+    trackName: state.trackName,
+    artistName: state.artistName,
+    albumName: state.albumName,
+    albumArtUrl: state.albumArtUrl ?? null,
+    trackUri: state.trackUri,
+    spotifyUrl: trackUriToUrl(state.trackUri),
+    isPlaying: state.isPlaying,
+    capturedAt: Date.now(),
+  };
+}
+
+/** Best-effort "what is playing right now" — prefers the recently polled state,
+ *  falls back to a live fetch when stale, and never throws. */
+async function getSnapshotState(userId: string): Promise<PlaybackState | null> {
+  const session = getSession(userId);
+  if (session.lastState && Date.now() - session.lastStateUpdatedAt <= SNAPSHOT_FRESH_MS) {
+    return session.lastState;
+  }
+  if (spotify.isConnected(userId)) {
+    const fresh = await spotify.getCurrentPlayback(userId).catch(() => null);
+    if (fresh) return fresh;
+  }
+  return session.lastState;
+}
+
+function readSpindleMeta(message: MsgLike): Record<string, unknown> {
+  // Event payloads carry spindle metadata under extra.spindle_metadata; the
+  // normalized getMessages() shape surfaces it on `metadata`. Support both.
+  const fromMeta = message.metadata;
+  if (fromMeta && typeof fromMeta === "object") return { ...fromMeta };
+  const fromExtra = message.extra?.spindle_metadata;
+  if (fromExtra && typeof fromExtra === "object") return { ...(fromExtra as Record<string, unknown>) };
+  return {};
+}
+
+function readSongMap(meta: Record<string, unknown>): Record<number, SongSnapshot> {
+  const node = meta[SONG_META_KEY] as { bySwipe?: Record<string, SongSnapshot> } | undefined;
+  const bySwipe = node?.bySwipe;
+  if (!bySwipe || typeof bySwipe !== "object") return {};
+  const out: Record<number, SongSnapshot> = {};
+  for (const [k, v] of Object.entries(bySwipe)) {
+    const idx = Number(k);
+    if (Number.isInteger(idx) && v && typeof v === "object") out[idx] = v as SongSnapshot;
+  }
+  return out;
+}
+
+function isAssistantMessage(message: MsgLike): boolean {
+  return message.is_user === false && message.name !== "System";
+}
+
+/** Capture + persist the currently-playing track for one (message, swipe). */
+async function captureSongForMessage(
+  chatId: string,
+  message: MsgLike,
+  swipeId: number,
+  userId: string,
+): Promise<void> {
+  if (!chatId || !message?.id) return;
+  const snapshot = buildSongSnapshot(await getSnapshotState(userId));
+  if (!snapshot) return; // nothing playing — no badge for this message/swipe
+
+  const meta = readSpindleMeta(message);
+  const map = readSongMap(meta);
+  map[swipeId] = snapshot;
+  meta[SONG_META_KEY] = { bySwipe: map };
+
+  try {
+    await spindle.chat.updateMessage(chatId, message.id, { metadata: meta, skipChunkRebuild: true });
+  } catch (err: any) {
+    spindle.log.warn(`Song capture (update) failed: ${err?.message}`);
+    return;
+  }
+  send({ type: "message_song", chatId, messageId: message.id, swipeId, snapshot }, userId);
+}
+
+/** Keep the per-swipe map aligned with swipes[] after a swipe is removed. */
+async function realignAfterSwipeDelete(
+  chatId: string,
+  message: MsgLike,
+  deletedIndex: number,
+  userId: string,
+): Promise<void> {
+  if (!message.id) return;
+  const meta = readSpindleMeta(message);
+  const map = readSongMap(meta);
+  if (Object.keys(map).length === 0) return;
+  const next: Record<number, SongSnapshot> = {};
+  for (const [k, v] of Object.entries(map)) {
+    const idx = Number(k);
+    if (idx === deletedIndex) continue;
+    next[idx > deletedIndex ? idx - 1 : idx] = v;
+  }
+  meta[SONG_META_KEY] = { bySwipe: next };
+  try {
+    await spindle.chat.updateMessage(chatId, message.id, { metadata: meta, skipChunkRebuild: true });
+  } catch (err: any) {
+    spindle.log.warn(`Song capture (realign) failed: ${err?.message}`);
+    return;
+  }
+  await sendChatSongs(chatId, userId).catch(() => {});
+}
+
+/** Read every assistant message's stored snapshots and push them to the client. */
+async function sendChatSongs(chatId: string, userId: string): Promise<void> {
+  if (!chatId) return;
+  let messages: Array<MsgLike & { id: string; swipe_id: number }>;
+  try {
+    messages = (await spindle.chat.getMessages(chatId)) as unknown as Array<MsgLike & { id: string; swipe_id: number }>;
+  } catch (err: any) {
+    spindle.log.warn(`get_chat_songs failed: ${err?.message}`);
+    return;
+  }
+  const entries: MessageSongEntry[] = [];
+  for (const m of messages) {
+    if (m.is_user) continue;
+    const map = readSongMap(readSpindleMeta(m));
+    if (Object.keys(map).length === 0) continue;
+    entries.push({ messageId: m.id, activeSwipe: m.swipe_id ?? 0, bySwipe: map });
+  }
+  send({ type: "chat_songs", chatId, entries }, userId);
+}
+
+// New assistant message → capture for its active swipe.
+spindle.on("MESSAGE_SENT", async (payload, userId) => {
+  const p = payload as { chatId?: string; message?: MsgLike } | undefined;
+  const message = p?.message;
+  const chatId = p?.chatId;
+  const uid = userId || activeUserId;
+  if (!chatId || !message || !uid || !isAssistantMessage(message)) return;
+  await captureSongForMessage(chatId, message, message.swipe_id ?? 0, uid).catch(() => {});
+});
+
+// Swipe added (regenerate / manual alternate) → capture for the new swipe.
+// Swipe deleted → realign the stored map so indices stay aligned with swipes[].
+spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
+  const p = payload as { chatId?: string; message?: MsgLike; action?: string; swipeId?: number } | undefined;
+  const message = p?.message;
+  const chatId = p?.chatId;
+  const uid = userId || activeUserId;
+  if (!chatId || !message || !uid || !message.id || !isAssistantMessage(message)) return;
+
+  if (p?.action === "added") {
+    const swipeId = typeof p.swipeId === "number" ? p.swipeId : message.swipe_id ?? 0;
+    await captureSongForMessage(chatId, message, swipeId, uid).catch(() => {});
+  } else if (p?.action === "deleted" && typeof p?.swipeId === "number") {
+    await realignAfterSwipeDelete(chatId, message, p.swipeId, uid).catch(() => {});
+  }
+});
 
 // ─── Command Palette ────────────────────────────────────────────────────
 

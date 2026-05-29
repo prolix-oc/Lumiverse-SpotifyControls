@@ -1987,6 +1987,218 @@ var PANEL_CSS = `
   }
 }
 
+/* ─── Per-message "song that was playing" badge ─────────────────────────── */
+
+.spotify-song-badge-wrap {
+  position: absolute;
+  bottom: 8px;
+  z-index: 4;
+  line-height: 0;
+}
+
+.spotify-song-badge-wrap[data-corner="right"] {
+  right: 8px;
+}
+
+.spotify-song-badge-wrap[data-corner="left"] {
+  left: 8px;
+}
+
+.spotify-song-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 50%;
+  background: var(--lumiverse-fill-subtle, rgba(127, 127, 127, 0.12));
+  color: var(--lumiverse-text-dim);
+  cursor: pointer;
+  opacity: 0.55;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition: opacity 160ms ease, color 160ms ease, border-color 160ms ease,
+              transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.spotify-song-badge:hover,
+.spotify-song-badge:focus-visible {
+  opacity: 1;
+  color: #1db954;
+  border-color: #1db954;
+  transform: scale(1.08);
+  outline: none;
+}
+
+.spotify-song-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ─── Song popover (sleek view, lazy-rendered on click) ─────────────────── */
+
+.spotify-song-pop {
+  position: fixed;
+  z-index: 9991;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--lumiverse-bg);
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 14px;
+  box-shadow: var(--lumiverse-shadow-xl);
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  backdrop-filter: blur(20px) saturate(1.1);
+  color: var(--lumiverse-text);
+  font-family: system-ui, -apple-system, sans-serif;
+  transform: scale(0.85);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity 140ms ease;
+}
+
+.spotify-song-pop.open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.spotify-song-pop-header {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lumiverse-text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spotify-song-pop-header::before {
+  content: "♪";
+  color: #1db954;
+  font-size: 12px;
+}
+
+.spotify-song-pop-body {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.spotify-song-pop-art {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--lumiverse-fill);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+.spotify-song-pop-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spotify-song-pop-track {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.spotify-song-pop-artist {
+  font-size: 12px;
+  color: var(--lumiverse-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-song-pop-album {
+  font-size: 11px;
+  color: var(--lumiverse-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-song-pop-when {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--lumiverse-text-dim);
+}
+
+.spotify-song-pop-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.spotify-song-pop-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 8px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 9px;
+  background: var(--lumiverse-fill-subtle, rgba(127, 127, 127, 0.1));
+  color: var(--lumiverse-text);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 120ms ease;
+}
+
+.spotify-song-pop-btn:hover {
+  border-color: var(--lumiverse-border-hover, var(--lumiverse-border));
+  transform: translateY(-1px);
+}
+
+.spotify-song-pop-btn:active {
+  transform: translateY(0);
+}
+
+.spotify-song-pop-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.spotify-song-pop-btn-primary {
+  background: #1db954;
+  border-color: #1db954;
+  color: #fff;
+}
+
+.spotify-song-pop-btn-primary:hover {
+  background: #1ed760;
+  border-color: #1ed760;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotify-song-badge,
+  .spotify-song-pop,
+  .spotify-song-pop-btn {
+    transition: none;
+  }
+}
+
 `;
 
 // src/ui/settings.ts
@@ -4355,6 +4567,367 @@ function createLyricsUI(onSeek) {
   };
 }
 
+// src/ui/song-badge.ts
+var BADGE_CORNER = "right";
+var ICON_NOTE2 = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
+var ICON_PLAY4 = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+var ICON_SHARE = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>`;
+var ICON_OPEN = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zM19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7z"/></svg>`;
+function formatCaptured(ms) {
+  try {
+    const d = new Date(ms);
+    return d.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  } catch {
+    return "";
+  }
+}
+function createSongBadgeManager(ctx, sendToBackend) {
+  const cache = new Map;
+  const activeSwipe = new Map;
+  const badges = new Map;
+  let currentChatId = null;
+  let pop = null;
+  let popArt = null;
+  let popTrack = null;
+  let popArtist = null;
+  let popAlbum = null;
+  let popWhen = null;
+  let popPlayBtn = null;
+  let popShareBtn = null;
+  let popOpenLink = null;
+  let openForMessageId = null;
+  let shareResetTimer = null;
+  function snapshotFor(messageId) {
+    const entry = cache.get(messageId);
+    if (!entry)
+      return null;
+    const sw = activeSwipe.get(messageId) ?? 0;
+    return entry.get(sw) ?? null;
+  }
+  function hasAnySnapshot(messageId) {
+    const entry = cache.get(messageId);
+    return !!entry && entry.size > 0;
+  }
+  function decorate(messageId) {
+    if (!hasAnySnapshot(messageId))
+      return;
+    let wrapper = badges.get(messageId);
+    if (!wrapper || !wrapper.isConnected) {
+      const bubble = ctx.dom.findMessageElement(messageId);
+      if (!bubble)
+        return;
+      const injected = ctx.dom.inject(bubble, `<button type="button" class="spotify-song-badge" aria-label="Song that was playing" title="Song that was playing">${ICON_NOTE2}</button>`, "beforeend");
+      injected.classList.add("spotify-song-badge-wrap");
+      injected.dataset.corner = BADGE_CORNER;
+      injected.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleFor(messageId, injected);
+      });
+      badges.set(messageId, injected);
+      wrapper = injected;
+    }
+    refreshBadge(messageId);
+  }
+  function refreshBadge(messageId) {
+    const wrapper = badges.get(messageId);
+    if (!wrapper)
+      return;
+    wrapper.style.display = snapshotFor(messageId) ? "" : "none";
+  }
+  function decorateMounted() {
+    for (const { messageId } of ctx.dom.listMessageElements()) {
+      if (hasAnySnapshot(messageId))
+        decorate(messageId);
+    }
+  }
+  function ensurePopover() {
+    if (pop)
+      return;
+    pop = document.createElement("div");
+    pop.className = "spotify-song-pop";
+    const header = document.createElement("div");
+    header.className = "spotify-song-pop-header";
+    header.textContent = "Playing when generated";
+    const body = document.createElement("div");
+    body.className = "spotify-song-pop-body";
+    popArt = createCrossfadeArt("spotify-song-pop-art");
+    popArt.el.style.display = "";
+    const info = document.createElement("div");
+    info.className = "spotify-song-pop-info";
+    popTrack = document.createElement("div");
+    popTrack.className = "spotify-song-pop-track";
+    popArtist = document.createElement("div");
+    popArtist.className = "spotify-song-pop-artist";
+    popAlbum = document.createElement("div");
+    popAlbum.className = "spotify-song-pop-album";
+    popWhen = document.createElement("div");
+    popWhen.className = "spotify-song-pop-when";
+    info.appendChild(popTrack);
+    info.appendChild(popArtist);
+    info.appendChild(popAlbum);
+    info.appendChild(popWhen);
+    body.appendChild(popArt.el);
+    body.appendChild(info);
+    const actions = document.createElement("div");
+    actions.className = "spotify-song-pop-actions";
+    popPlayBtn = document.createElement("button");
+    popPlayBtn.type = "button";
+    popPlayBtn.className = "spotify-song-pop-btn spotify-song-pop-btn-primary";
+    popPlayBtn.innerHTML = `${ICON_PLAY4}<span>Play</span>`;
+    popPlayBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const snap = openForMessageId ? snapshotFor(openForMessageId) : null;
+      if (snap?.trackUri)
+        sendToBackend({ type: "play", trackUri: snap.trackUri });
+      closePopover();
+    });
+    popShareBtn = document.createElement("button");
+    popShareBtn.type = "button";
+    popShareBtn.className = "spotify-song-pop-btn";
+    resetShareBtn();
+    popShareBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const snap = openForMessageId ? snapshotFor(openForMessageId) : null;
+      if (snap)
+        shareSnapshot(snap);
+    });
+    popOpenLink = document.createElement("a");
+    popOpenLink.className = "spotify-song-pop-btn spotify-song-pop-link";
+    popOpenLink.target = "_blank";
+    popOpenLink.rel = "noopener noreferrer";
+    popOpenLink.innerHTML = `${ICON_OPEN}<span>Open</span>`;
+    popOpenLink.addEventListener("click", (e) => e.stopPropagation());
+    actions.appendChild(popPlayBtn);
+    actions.appendChild(popShareBtn);
+    actions.appendChild(popOpenLink);
+    pop.appendChild(header);
+    pop.appendChild(body);
+    pop.appendChild(actions);
+    pop.addEventListener("click", (e) => e.stopPropagation());
+    document.body.appendChild(pop);
+  }
+  function resetShareBtn() {
+    if (!popShareBtn)
+      return;
+    popShareBtn.innerHTML = `${ICON_SHARE}<span>Share</span>`;
+  }
+  async function shareSnapshot(snap) {
+    const text = `${snap.trackName} — ${snap.artistName}`;
+    const nav = navigator;
+    if (typeof nav.share === "function") {
+      try {
+        await nav.share({ title: snap.trackName, text, url: snap.spotifyUrl });
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard?.writeText(snap.spotifyUrl);
+      if (popShareBtn) {
+        popShareBtn.innerHTML = `${ICON_SHARE}<span>Copied!</span>`;
+        if (shareResetTimer)
+          clearTimeout(shareResetTimer);
+        shareResetTimer = setTimeout(resetShareBtn, 1400);
+      }
+    } catch {}
+  }
+  function renderPopover(snap) {
+    ensurePopover();
+    resetShareBtn();
+    if (!snap) {
+      popArt?.setUrl(null);
+      if (popTrack)
+        popTrack.textContent = "No track playing";
+      if (popArtist)
+        popArtist.textContent = "";
+      if (popAlbum)
+        popAlbum.textContent = "Nothing was playing when this version was written.";
+      if (popWhen)
+        popWhen.textContent = "";
+      if (popPlayBtn)
+        popPlayBtn.style.display = "none";
+      if (popShareBtn)
+        popShareBtn.style.display = "none";
+      if (popOpenLink)
+        popOpenLink.style.display = "none";
+      return;
+    }
+    popArt?.setUrl(getTrackScopedArtUrl(snap.albumArtUrl, snap.trackUri));
+    if (popTrack)
+      popTrack.textContent = snap.trackName;
+    if (popArtist)
+      popArtist.textContent = snap.artistName;
+    if (popAlbum)
+      popAlbum.textContent = snap.albumName;
+    if (popWhen)
+      popWhen.textContent = formatCaptured(snap.capturedAt);
+    if (popPlayBtn)
+      popPlayBtn.style.display = "";
+    if (popShareBtn)
+      popShareBtn.style.display = "";
+    if (popOpenLink) {
+      popOpenLink.style.display = "";
+      popOpenLink.href = snap.spotifyUrl;
+    }
+  }
+  function positionPopover(anchor) {
+    if (!pop)
+      return;
+    const r = anchor.getBoundingClientRect();
+    const pw = pop.offsetWidth || 280;
+    const ph = pop.offsetHeight || 200;
+    const pad = 8;
+    let top = r.top - ph - 8;
+    let originY = "bottom";
+    if (top < pad) {
+      top = r.bottom + 8;
+      originY = "top";
+    }
+    let left = r.right - pw;
+    const originX = BADGE_CORNER === "right" ? "right" : "left";
+    if (BADGE_CORNER === "left")
+      left = r.left;
+    left = Math.max(pad, Math.min(left, window.innerWidth - pw - pad));
+    top = Math.max(pad, Math.min(top, window.innerHeight - ph - pad));
+    pop.style.left = `${left}px`;
+    pop.style.top = `${top}px`;
+    pop.style.transformOrigin = `${originY} ${originX}`;
+  }
+  function onOutsidePointer(e) {
+    if (pop && e.target instanceof Node && pop.contains(e.target))
+      return;
+    closePopover();
+  }
+  function onScroll() {
+    closePopover();
+  }
+  function onKey(e) {
+    if (e.key === "Escape")
+      closePopover();
+  }
+  function openPopover(messageId, anchor) {
+    renderPopover(snapshotFor(messageId));
+    openForMessageId = messageId;
+    pop.classList.add("open");
+    positionPopover(anchor);
+    setTimeout(() => {
+      document.addEventListener("click", onOutsidePointer, true);
+      window.addEventListener("scroll", onScroll, true);
+      window.addEventListener("resize", onScroll, true);
+      document.addEventListener("keydown", onKey, true);
+    }, 0);
+  }
+  function closePopover() {
+    if (!pop || !openForMessageId)
+      return;
+    pop.classList.remove("open");
+    openForMessageId = null;
+    document.removeEventListener("click", onOutsidePointer, true);
+    window.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("resize", onScroll, true);
+    document.removeEventListener("keydown", onKey, true);
+  }
+  function toggleFor(messageId, anchor) {
+    if (openForMessageId === messageId) {
+      closePopover();
+    } else {
+      if (openForMessageId)
+        closePopover();
+      openPopover(messageId, anchor);
+    }
+  }
+  function setChatSongs(chatId, entries) {
+    if (chatId !== currentChatId)
+      reset();
+    currentChatId = chatId;
+    const incoming = new Set(entries.map((e) => e.messageId));
+    for (const messageId of [...cache.keys()]) {
+      if (!incoming.has(messageId))
+        removeMessage(messageId);
+    }
+    for (const entry of entries) {
+      const map = new Map;
+      for (const [k, snap] of Object.entries(entry.bySwipe)) {
+        map.set(Number(k), snap);
+      }
+      cache.set(entry.messageId, map);
+      activeSwipe.set(entry.messageId, entry.activeSwipe);
+      decorate(entry.messageId);
+    }
+  }
+  function setMessageSong(chatId, messageId, swipeId, snapshot) {
+    if (currentChatId && chatId !== currentChatId)
+      return;
+    currentChatId = chatId;
+    const map = cache.get(messageId) ?? new Map;
+    map.set(swipeId, snapshot);
+    cache.set(messageId, map);
+    activeSwipe.set(messageId, swipeId);
+    decorate(messageId);
+    if (openForMessageId === messageId)
+      renderPopover(snapshotFor(messageId));
+  }
+  function setActiveSwipe(messageId, swipeId) {
+    activeSwipe.set(messageId, swipeId);
+    refreshBadge(messageId);
+    if (openForMessageId === messageId) {
+      const snap = snapshotFor(messageId);
+      if (snap)
+        renderPopover(snap);
+      else
+        closePopover();
+    }
+  }
+  function removeMessage(messageId) {
+    if (openForMessageId === messageId)
+      closePopover();
+    cache.delete(messageId);
+    activeSwipe.delete(messageId);
+    const wrapper = badges.get(messageId);
+    if (wrapper) {
+      try {
+        ctx.dom.uninject(wrapper);
+      } catch {}
+      badges.delete(messageId);
+    }
+  }
+  function reset() {
+    closePopover();
+    for (const wrapper of badges.values()) {
+      try {
+        ctx.dom.uninject(wrapper);
+      } catch {}
+    }
+    badges.clear();
+    cache.clear();
+    activeSwipe.clear();
+    currentChatId = null;
+  }
+  function destroy() {
+    reset();
+    if (shareResetTimer)
+      clearTimeout(shareResetTimer);
+    popArt?.destroy();
+    pop?.remove();
+    pop = null;
+  }
+  return {
+    setChatSongs,
+    setMessageSong,
+    decorate,
+    decorateMounted,
+    setActiveSwipe,
+    removeMessage,
+    reset,
+    destroy
+  };
+}
+
 // src/frontend.ts
 var SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 var MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
@@ -4985,6 +5558,38 @@ function setup(ctx) {
     sendToBackend({ type: "search", query });
   });
   cleanups.push(tagUnsub);
+  const songBadges = createSongBadgeManager(ctx, sendToBackend);
+  cleanups.push(() => songBadges.destroy());
+  function requestChatSongs(chatId) {
+    if (chatId)
+      sendToBackend({ type: "get_chat_songs", chatId });
+  }
+  requestChatSongs(ctx.getActiveChat().chatId);
+  const chatSwitchUnsub = ctx.events.on("CHAT_SWITCHED", (payload) => {
+    const chatId = payload?.chatId ?? null;
+    songBadges.reset();
+    requestChatSongs(chatId);
+  });
+  cleanups.push(chatSwitchUnsub);
+  const renderUnsub = ctx.events.on("CHARACTER_MESSAGE_RENDERED", (payload) => {
+    const messageId = payload?.messageId;
+    if (messageId)
+      songBadges.decorate(messageId);
+  });
+  cleanups.push(renderUnsub);
+  const swipeUnsub = ctx.events.on("MESSAGE_SWIPED", (payload) => {
+    const p = payload;
+    const id = p?.message?.id;
+    if (id)
+      songBadges.setActiveSwipe(id, p.message?.swipe_id ?? 0);
+  });
+  cleanups.push(swipeUnsub);
+  const deleteUnsub = ctx.events.on("MESSAGE_DELETED", (payload) => {
+    const messageId = payload?.messageId;
+    if (messageId)
+      songBadges.removeMessage(messageId);
+  });
+  cleanups.push(deleteUnsub);
   let trackEndTimer = null;
   function scheduleTrackEndRefresh(state) {
     if (trackEndTimer) {
@@ -5136,6 +5741,12 @@ function setup(ctx) {
         lyricsUI.update(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
         lyricsUI.updatePlayback(currentState);
         modernWidget.updateLyrics(msg.trackUri, msg.plainLyrics, msg.syncedLyrics, msg.instrumental);
+        break;
+      case "chat_songs":
+        songBadges.setChatSongs(msg.chatId, msg.entries);
+        break;
+      case "message_song":
+        songBadges.setMessageSong(msg.chatId, msg.messageId, msg.swipeId, msg.snapshot);
         break;
       case "error":
         console.warn("[Spotify Controls]", msg.message);

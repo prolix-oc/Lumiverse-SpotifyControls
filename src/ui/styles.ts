@@ -1986,4 +1986,216 @@ export const PANEL_CSS = `
   }
 }
 
+/* ─── Per-message "song that was playing" badge ─────────────────────────── */
+
+.spotify-song-badge-wrap {
+  position: absolute;
+  bottom: 8px;
+  z-index: 4;
+  line-height: 0;
+}
+
+.spotify-song-badge-wrap[data-corner="right"] {
+  right: 8px;
+}
+
+.spotify-song-badge-wrap[data-corner="left"] {
+  left: 8px;
+}
+
+.spotify-song-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 50%;
+  background: var(--lumiverse-fill-subtle, rgba(127, 127, 127, 0.12));
+  color: var(--lumiverse-text-dim);
+  cursor: pointer;
+  opacity: 0.55;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition: opacity 160ms ease, color 160ms ease, border-color 160ms ease,
+              transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.spotify-song-badge:hover,
+.spotify-song-badge:focus-visible {
+  opacity: 1;
+  color: #1db954;
+  border-color: #1db954;
+  transform: scale(1.08);
+  outline: none;
+}
+
+.spotify-song-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ─── Song popover (sleek view, lazy-rendered on click) ─────────────────── */
+
+.spotify-song-pop {
+  position: fixed;
+  z-index: 9991;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--lumiverse-bg);
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 14px;
+  box-shadow: var(--lumiverse-shadow-xl);
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  backdrop-filter: blur(20px) saturate(1.1);
+  color: var(--lumiverse-text);
+  font-family: system-ui, -apple-system, sans-serif;
+  transform: scale(0.85);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity 140ms ease;
+}
+
+.spotify-song-pop.open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.spotify-song-pop-header {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lumiverse-text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spotify-song-pop-header::before {
+  content: "♪";
+  color: #1db954;
+  font-size: 12px;
+}
+
+.spotify-song-pop-body {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.spotify-song-pop-art {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--lumiverse-fill);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+.spotify-song-pop-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spotify-song-pop-track {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.spotify-song-pop-artist {
+  font-size: 12px;
+  color: var(--lumiverse-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-song-pop-album {
+  font-size: 11px;
+  color: var(--lumiverse-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-song-pop-when {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--lumiverse-text-dim);
+}
+
+.spotify-song-pop-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.spotify-song-pop-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 8px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 9px;
+  background: var(--lumiverse-fill-subtle, rgba(127, 127, 127, 0.1));
+  color: var(--lumiverse-text);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 120ms ease;
+}
+
+.spotify-song-pop-btn:hover {
+  border-color: var(--lumiverse-border-hover, var(--lumiverse-border));
+  transform: translateY(-1px);
+}
+
+.spotify-song-pop-btn:active {
+  transform: translateY(0);
+}
+
+.spotify-song-pop-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.spotify-song-pop-btn-primary {
+  background: #1db954;
+  border-color: #1db954;
+  color: #fff;
+}
+
+.spotify-song-pop-btn-primary:hover {
+  background: #1ed760;
+  border-color: #1ed760;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotify-song-badge,
+  .spotify-song-pop,
+  .spotify-song-pop-btn {
+    transition: none;
+  }
+}
+
 `;
