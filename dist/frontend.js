@@ -2172,6 +2172,8 @@ var PANEL_CSS = `
 }
 
 .spotify-song-pop-btn svg {
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 
@@ -2182,11 +2184,6 @@ var PANEL_CSS = `
 
 .spotify-song-pop-btn:active {
   transform: translateY(0);
-}
-
-.spotify-song-pop-btn svg {
-  width: 14px;
-  height: 14px;
 }
 
 .spotify-song-pop-btn-primary {
