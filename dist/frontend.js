@@ -2148,12 +2148,15 @@ var PANEL_CSS = `
 }
 
 .spotify-song-pop-btn {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  padding: 7px 8px;
+  padding: 0 8px;
   border: 1px solid var(--lumiverse-border);
   border-radius: 9px;
   background: var(--lumiverse-fill-subtle, rgba(127, 127, 127, 0.1));
@@ -2161,9 +2164,15 @@ var PANEL_CSS = `
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
+  line-height: 1;
+  white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, transform 120ms ease;
+}
+
+.spotify-song-pop-btn svg {
+  flex-shrink: 0;
 }
 
 .spotify-song-pop-btn:hover {
@@ -4601,6 +4610,7 @@ function createSongBadgeManager(ctx, sendToBackend) {
   let popShareBtn = null;
   let popOpenLink = null;
   let openForMessageId = null;
+  let openAnchor = null;
   let shareResetTimer = null;
   function snapshotFor(messageId) {
     const entry = cache.get(messageId);
@@ -4799,7 +4809,12 @@ function createSongBadgeManager(ctx, sendToBackend) {
     pop.style.transformOrigin = `${originY} ${originX}`;
   }
   function onOutsidePointer(e) {
-    if (pop && e.target instanceof Node && pop.contains(e.target))
+    const target = e.target;
+    if (!(target instanceof Node))
+      return;
+    if (pop && pop.contains(target))
+      return;
+    if (openAnchor && openAnchor.contains(target))
       return;
     closePopover();
   }
@@ -4813,6 +4828,7 @@ function createSongBadgeManager(ctx, sendToBackend) {
   function openPopover(messageId, anchor) {
     renderPopover(snapshotFor(messageId));
     openForMessageId = messageId;
+    openAnchor = anchor;
     pop.classList.add("open");
     positionPopover(anchor);
     setTimeout(() => {
@@ -4827,6 +4843,7 @@ function createSongBadgeManager(ctx, sendToBackend) {
       return;
     pop.classList.remove("open");
     openForMessageId = null;
+    openAnchor = null;
     document.removeEventListener("click", onOutsidePointer, true);
     window.removeEventListener("scroll", onScroll, true);
     window.removeEventListener("resize", onScroll, true);
@@ -4921,6 +4938,7 @@ function createSongBadgeManager(ctx, sendToBackend) {
     setMessageSong,
     decorate,
     decorateMounted,
+    hasSnapshots: hasAnySnapshot,
     setActiveSwipe,
     removeMessage,
     reset,
@@ -5779,17 +5797,23 @@ function setup(ctx) {
   });
   cleanups.push(permUnsub);
   ctx.permissions.getGranted().then((granted) => {
-    if (granted.includes("cors_proxy"))
+    const need = [];
+    if (!granted.includes("cors_proxy"))
+      need.push("cors_proxy");
+    if (!granted.includes("generation"))
+      need.push("generation");
+    if (need.length === 0)
       return;
+    const message = need.includes("cors_proxy") ? "Spotify Controls needs the CORS Proxy permission to communicate with the Spotify and Last.fm APIs. The Generation permission additionally lets it remember which song was playing when each reply was generated." : "Let Spotify Controls remember which song was playing when each reply was generated? This needs the Generation permission so it can capture the track the moment a reply begins.";
     ctx.ui.showConfirm({
-      title: "Permission Required",
-      message: "Spotify Controls needs the CORS Proxy permission to communicate with the Spotify and Last.fm APIs on your behalf.",
+      title: need.includes("cors_proxy") ? "Permission Required" : "Enable Song Memory?",
+      message,
       variant: "info",
       confirmLabel: "Grant Permission",
       cancelLabel: "Not Now"
     }).then(({ confirmed }) => {
       if (confirmed) {
-        ctx.permissions.request(["cors_proxy"]);
+        ctx.permissions.request(need);
       }
     });
   });

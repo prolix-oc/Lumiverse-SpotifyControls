@@ -1065,12 +1065,18 @@ function readSongMap(meta) {
 function isAssistantMessage(message) {
   return message.is_user === false && message.name !== "System";
 }
-async function captureSongForMessage(chatId, message, swipeId, userId) {
-  if (!chatId || !message?.id)
-    return;
-  const snapshot = buildSongSnapshot(await getSnapshotState(userId));
-  if (!snapshot)
-    return;
+async function getAssistantMessage(chatId, messageId) {
+  let messages;
+  try {
+    messages = await spindle.chat.getMessages(chatId);
+  } catch (err) {
+    spindle.log.warn(`Song capture (read) failed: ${err?.message}`);
+    return null;
+  }
+  const m = messages.find((x) => x.id === messageId);
+  return m && isAssistantMessage(m) ? m : null;
+}
+async function writeSnapshotToMessage(chatId, message, swipeId, snapshot, userId) {
   const meta = readSpindleMeta(message);
   const map = readSongMap(meta);
   map[swipeId] = snapshot;
@@ -1106,6 +1112,64 @@ async function realignAfterSwipeDelete(chatId, message, deletedIndex, userId) {
   }
   await sendChatSongs(chatId, userId).catch(() => {});
 }
+var pendingGenerationSongs = new Map;
+var PENDING_GEN_MAX = 64;
+var generationUnsubs = [];
+async function onGenerationStarted(payload, userId) {
+  const p = payload;
+  const genId = p?.generationId;
+  const uid = userId || activeUserId2;
+  if (!genId || !uid)
+    return;
+  const snapshot = buildSongSnapshot(await getSnapshotState(uid));
+  if (!snapshot)
+    return;
+  if (pendingGenerationSongs.size >= PENDING_GEN_MAX) {
+    const oldest = pendingGenerationSongs.keys().next().value;
+    if (oldest)
+      pendingGenerationSongs.delete(oldest);
+  }
+  pendingGenerationSongs.set(genId, { snapshot, userId: uid });
+}
+async function onGenerationEnded(payload) {
+  const p = payload;
+  const genId = p?.generationId;
+  if (!genId)
+    return;
+  const pending = pendingGenerationSongs.get(genId);
+  pendingGenerationSongs.delete(genId);
+  if (!pending)
+    return;
+  if (p?.error || !p.messageId || !p.chatId)
+    return;
+  const message = await getAssistantMessage(p.chatId, p.messageId);
+  if (!message)
+    return;
+  await writeSnapshotToMessage(p.chatId, message, message.swipe_id ?? 0, pending.snapshot, pending.userId);
+}
+function setupGenerationCapture() {
+  for (const unsub of generationUnsubs) {
+    try {
+      unsub();
+    } catch {}
+  }
+  generationUnsubs = [];
+  try {
+    generationUnsubs.push(spindle.on("GENERATION_STARTED", (payload, userId) => {
+      onGenerationStarted(payload, userId);
+    }));
+    generationUnsubs.push(spindle.on("GENERATION_ENDED", (payload) => {
+      onGenerationEnded(payload);
+    }));
+  } catch (err) {
+    spindle.log.warn(`Generation capture subscribe failed: ${err?.message}`);
+  }
+}
+setupGenerationCapture();
+spindle.permissions.onChanged(({ permission, granted }) => {
+  if (permission === "generation" && granted)
+    setupGenerationCapture();
+});
 async function sendChatSongs(chatId, userId) {
   if (!chatId)
     return;
@@ -1127,15 +1191,6 @@ async function sendChatSongs(chatId, userId) {
   }
   send({ type: "chat_songs", chatId, entries }, userId);
 }
-spindle.on("MESSAGE_SENT", async (payload, userId) => {
-  const p = payload;
-  const message = p?.message;
-  const chatId = p?.chatId;
-  const uid = userId || activeUserId2;
-  if (!chatId || !message || !uid || !isAssistantMessage(message))
-    return;
-  await captureSongForMessage(chatId, message, message.swipe_id ?? 0, uid).catch(() => {});
-});
 spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
   const p = payload;
   const message = p?.message;
@@ -1143,10 +1198,7 @@ spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
   const uid = userId || activeUserId2;
   if (!chatId || !message || !uid || !message.id || !isAssistantMessage(message))
     return;
-  if (p?.action === "added") {
-    const swipeId = typeof p.swipeId === "number" ? p.swipeId : message.swipe_id ?? 0;
-    await captureSongForMessage(chatId, message, swipeId, uid).catch(() => {});
-  } else if (p?.action === "deleted" && typeof p?.swipeId === "number") {
+  if (p?.action === "deleted" && typeof p?.swipeId === "number") {
     await realignAfterSwipeDelete(chatId, message, p.swipeId, uid).catch(() => {});
   }
 });

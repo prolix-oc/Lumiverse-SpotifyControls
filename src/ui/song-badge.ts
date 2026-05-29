@@ -19,6 +19,8 @@ export interface SongBadgeManager {
   decorate(messageId: string): void;
   /** Decorate every currently-mounted message bubble. */
   decorateMounted(): void;
+  /** Whether we already hold at least one snapshot for a message. */
+  hasSnapshots(messageId: string): boolean;
   /** Track which swipe a message is showing so the popover/badge follow it. */
   setActiveSwipe(messageId: string, swipeId: number): void;
   /** Forget a deleted message. */
@@ -66,6 +68,7 @@ export function createSongBadgeManager(
   let popShareBtn: HTMLButtonElement | null = null;
   let popOpenLink: HTMLAnchorElement | null = null;
   let openForMessageId: string | null = null;
+  let openAnchor: HTMLElement | null = null;
   let shareResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   function snapshotFor(messageId: string): SongSnapshot | null {
@@ -287,7 +290,12 @@ export function createSongBadgeManager(
   }
 
   function onOutsidePointer(e: Event): void {
-    if (pop && e.target instanceof Node && pop.contains(e.target)) return;
+    const target = e.target;
+    if (!(target instanceof Node)) return;
+    if (pop && pop.contains(target)) return;
+    // Ignore clicks on the open badge itself — its own handler toggles us shut,
+    // so closing here too would let the badge handler immediately reopen us.
+    if (openAnchor && openAnchor.contains(target)) return;
     closePopover();
   }
   function onScroll(): void {
@@ -300,6 +308,7 @@ export function createSongBadgeManager(
   function openPopover(messageId: string, anchor: HTMLElement): void {
     renderPopover(snapshotFor(messageId));
     openForMessageId = messageId;
+    openAnchor = anchor;
     pop!.classList.add("open");
     positionPopover(anchor);
     // Defer listener registration so the click that opened us doesn't close us.
@@ -315,6 +324,7 @@ export function createSongBadgeManager(
     if (!pop || !openForMessageId) return;
     pop.classList.remove("open");
     openForMessageId = null;
+    openAnchor = null;
     document.removeEventListener("click", onOutsidePointer, true);
     window.removeEventListener("scroll", onScroll, true);
     window.removeEventListener("resize", onScroll, true);
@@ -419,6 +429,7 @@ export function createSongBadgeManager(
     setMessageSong,
     decorate,
     decorateMounted,
+    hasSnapshots: hasAnySnapshot,
     setActiveSwipe,
     removeMessage,
     reset,

@@ -756,7 +756,8 @@ async function applyAlbumTheme(colors: AlbumColors | null, userId?: string): Pro
 // Capture the Spotify track that was playing when an assistant message (or one
 // of its swipes) was generated, and persist it per-swipe in the message's
 // spindle metadata. The corner badge popover (frontend) renders from this.
-// Requires the `chat_mutation` permission.
+// Capture is driven by generation events (`generation` permission); persistence
+// uses chat mutation (`chat_mutation` permission).
 
 const SONG_META_KEY = "spotify_song";
 const SNAPSHOT_FRESH_MS = 8000;
@@ -831,22 +832,34 @@ function isAssistantMessage(message: MsgLike): boolean {
   return message.is_user === false && message.name !== "System";
 }
 
-/** Capture + persist the currently-playing track for one (message, swipe). */
-async function captureSongForMessage(
+/** Look up a single assistant message by id (returns null for user/system/missing). */
+async function getAssistantMessage(
   chatId: string,
-  message: MsgLike,
+  messageId: string,
+): Promise<(MsgLike & { id: string; swipe_id: number }) | null> {
+  let messages: Array<MsgLike & { id: string; swipe_id: number }>;
+  try {
+    messages = (await spindle.chat.getMessages(chatId)) as unknown as Array<MsgLike & { id: string; swipe_id: number }>;
+  } catch (err: any) {
+    spindle.log.warn(`Song capture (read) failed: ${err?.message}`);
+    return null;
+  }
+  const m = messages.find((x) => x.id === messageId);
+  return m && isAssistantMessage(m) ? m : null;
+}
+
+/** Persist a prebuilt snapshot onto one (message, swipe) and notify the client. */
+async function writeSnapshotToMessage(
+  chatId: string,
+  message: MsgLike & { id: string },
   swipeId: number,
+  snapshot: SongSnapshot,
   userId: string,
 ): Promise<void> {
-  if (!chatId || !message?.id) return;
-  const snapshot = buildSongSnapshot(await getSnapshotState(userId));
-  if (!snapshot) return; // nothing playing — no badge for this message/swipe
-
   const meta = readSpindleMeta(message);
   const map = readSongMap(meta);
   map[swipeId] = snapshot;
   meta[SONG_META_KEY] = { bySwipe: map };
-
   try {
     await spindle.chat.updateMessage(chatId, message.id, { metadata: meta, skipChunkRebuild: true });
   } catch (err: any) {
@@ -883,6 +896,65 @@ async function realignAfterSwipeDelete(
   await sendChatSongs(chatId, userId).catch(() => {});
 }
 
+// ── Capture at generation start (most reliable + most accurate) ───────────
+// GENERATION_STARTED fires the instant a reply begins, so the snapshot reflects
+// exactly what was playing when the assistant "wrote" the message. The target
+// message id isn't known until GENERATION_ENDED, so we stash the snapshot keyed
+// by generationId and persist it once the saved message id arrives.
+// Both events require the `generation` permission.
+
+const pendingGenerationSongs = new Map<string, { snapshot: SongSnapshot; userId: string }>();
+const PENDING_GEN_MAX = 64;
+let generationUnsubs: Array<() => void> = [];
+
+async function onGenerationStarted(payload: unknown, userId?: string): Promise<void> {
+  const p = payload as { generationId?: string } | undefined;
+  const genId = p?.generationId;
+  const uid = userId || activeUserId;
+  if (!genId || !uid) return;
+  const snapshot = buildSongSnapshot(await getSnapshotState(uid));
+  if (!snapshot) return; // nothing playing when generation began — no badge
+  if (pendingGenerationSongs.size >= PENDING_GEN_MAX) {
+    const oldest = pendingGenerationSongs.keys().next().value;
+    if (oldest) pendingGenerationSongs.delete(oldest);
+  }
+  pendingGenerationSongs.set(genId, { snapshot, userId: uid });
+}
+
+async function onGenerationEnded(payload: unknown): Promise<void> {
+  const p = payload as { generationId?: string; chatId?: string; messageId?: string; error?: string } | undefined;
+  const genId = p?.generationId;
+  if (!genId) return;
+  const pending = pendingGenerationSongs.get(genId);
+  pendingGenerationSongs.delete(genId);
+  if (!pending) return;
+  if (p?.error || !p.messageId || !p.chatId) return; // failed/aborted — drop it
+  const message = await getAssistantMessage(p.chatId, p.messageId);
+  if (!message) return;
+  await writeSnapshotToMessage(p.chatId, message, message.swipe_id ?? 0, pending.snapshot, pending.userId);
+}
+
+/** (Re)subscribe to generation events. Re-run when the permission is granted at
+ *  runtime so a subscription rejected while ungranted starts firing. */
+function setupGenerationCapture(): void {
+  for (const unsub of generationUnsubs) {
+    try { unsub(); } catch { /* ignore */ }
+  }
+  generationUnsubs = [];
+  try {
+    generationUnsubs.push(spindle.on("GENERATION_STARTED", (payload, userId) => { void onGenerationStarted(payload, userId); }));
+    generationUnsubs.push(spindle.on("GENERATION_ENDED", (payload) => { void onGenerationEnded(payload); }));
+  } catch (err: any) {
+    spindle.log.warn(`Generation capture subscribe failed: ${err?.message}`);
+  }
+}
+
+setupGenerationCapture();
+
+spindle.permissions.onChanged(({ permission, granted }) => {
+  if (permission === "generation" && granted) setupGenerationCapture();
+});
+
 /** Read every assistant message's stored snapshots and push them to the client. */
 async function sendChatSongs(chatId: string, userId: string): Promise<void> {
   if (!chatId) return;
@@ -903,18 +975,8 @@ async function sendChatSongs(chatId: string, userId: string): Promise<void> {
   send({ type: "chat_songs", chatId, entries }, userId);
 }
 
-// New assistant message → capture for its active swipe.
-spindle.on("MESSAGE_SENT", async (payload, userId) => {
-  const p = payload as { chatId?: string; message?: MsgLike } | undefined;
-  const message = p?.message;
-  const chatId = p?.chatId;
-  const uid = userId || activeUserId;
-  if (!chatId || !message || !uid || !isAssistantMessage(message)) return;
-  await captureSongForMessage(chatId, message, message.swipe_id ?? 0, uid).catch(() => {});
-});
-
-// Swipe added (regenerate / manual alternate) → capture for the new swipe.
 // Swipe deleted → realign the stored map so indices stay aligned with swipes[].
+// (New swipes/regenerations are captured via the generation events above.)
 spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
   const p = payload as { chatId?: string; message?: MsgLike; action?: string; swipeId?: number } | undefined;
   const message = p?.message;
@@ -922,10 +984,7 @@ spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
   const uid = userId || activeUserId;
   if (!chatId || !message || !uid || !message.id || !isAssistantMessage(message)) return;
 
-  if (p?.action === "added") {
-    const swipeId = typeof p.swipeId === "number" ? p.swipeId : message.swipe_id ?? 0;
-    await captureSongForMessage(chatId, message, swipeId, uid).catch(() => {});
-  } else if (p?.action === "deleted" && typeof p?.swipeId === "number") {
+  if (p?.action === "deleted" && typeof p?.swipeId === "number") {
     await realignAfterSwipeDelete(chatId, message, p.swipeId, uid).catch(() => {});
   }
 });

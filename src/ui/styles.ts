@@ -2147,12 +2147,15 @@ export const PANEL_CSS = `
 }
 
 .spotify-song-pop-btn {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  padding: 7px 8px;
+  padding: 0 8px;
   border: 1px solid var(--lumiverse-border);
   border-radius: 9px;
   background: var(--lumiverse-fill-subtle, rgba(127, 127, 127, 0.1));
@@ -2160,9 +2163,15 @@ export const PANEL_CSS = `
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
+  line-height: 1;
+  white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, transform 120ms ease;
+}
+
+.spotify-song-pop-btn svg {
+  flex-shrink: 0;
 }
 
 .spotify-song-pop-btn:hover {

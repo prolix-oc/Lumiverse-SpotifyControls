@@ -797,7 +797,8 @@ export function setup(ctx: SpindleFrontendContext) {
   });
   cleanups.push(chatSwitchUnsub);
 
-  // Decorate assistant bubbles as they render into the virtualized list.
+  // Decorate assistant bubbles as they render (capture itself is backend-driven
+  // via generation events). The injection survives list virtualization.
   const renderUnsub = ctx.events.on("CHARACTER_MESSAGE_RENDERED", (payload) => {
     const messageId = (payload as { messageId?: string })?.messageId;
     if (messageId) songBadges.decorate(messageId);
@@ -1035,21 +1036,30 @@ export function setup(ctx: SpindleFrontendContext) {
   });
   cleanups.push(permUnsub);
 
-  // Prompt once on startup if the permission hasn't been granted yet
+  // Prompt once on startup for any permissions we still need. CORS Proxy is
+  // essential; Generation lets us snapshot the track that was playing when each
+  // reply was generated (powers the per-message song badge).
   ctx.permissions.getGranted().then((granted) => {
-    if (granted.includes("cors_proxy")) return;
+    const need: string[] = [];
+    if (!granted.includes("cors_proxy")) need.push("cors_proxy");
+    if (!granted.includes("generation")) need.push("generation");
+    if (need.length === 0) return;
+
+    const message = need.includes("cors_proxy")
+      ? "Spotify Controls needs the CORS Proxy permission to communicate with the Spotify and Last.fm APIs. The Generation permission additionally lets it remember which song was playing when each reply was generated."
+      : "Let Spotify Controls remember which song was playing when each reply was generated? This needs the Generation permission so it can capture the track the moment a reply begins.";
+
     ctx.ui
       .showConfirm({
-        title: "Permission Required",
-        message:
-          "Spotify Controls needs the CORS Proxy permission to communicate with the Spotify and Last.fm APIs on your behalf.",
+        title: need.includes("cors_proxy") ? "Permission Required" : "Enable Song Memory?",
+        message,
         variant: "info",
         confirmLabel: "Grant Permission",
         cancelLabel: "Not Now",
       })
       .then(({ confirmed }) => {
         if (confirmed) {
-          ctx.permissions.request(["cors_proxy"]);
+          ctx.permissions.request(need);
         }
       });
   });
