@@ -12,6 +12,7 @@ export interface LyricsUI {
   update(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean): void;
   updatePlayback(state: PlaybackState | null): void;
   setLoading(loading: boolean): void;
+  setAutoScrollSuspended(suspended: boolean): void;
   clear(): void;
   destroy(): void;
 }
@@ -81,6 +82,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   let loadingTimer: ReturnType<typeof setTimeout> | null = null;
   let isAutoScrolling = false;
   let lastUserScrollAt = 0;
+  let autoScrollSuspended = false;
   let pendingSeekPositionMs: number | null = null;
   let pendingSeekUntil = 0;
 
@@ -141,7 +143,8 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     });
 
     const activeLine = syncedLines.find((line) => line.index === activeLineIndex);
-    const shouldCenter = options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
+    // While a context menu is open, never auto-scroll — a scroll dismisses the menu.
+    const shouldCenter = !autoScrollSuspended && (options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS);
     if (activeLine && shouldCenter) {
       isAutoScrolling = true;
       if (autoScrollTimer) clearTimeout(autoScrollTimer);
@@ -321,6 +324,16 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     update,
     updatePlayback,
     setLoading,
+    setAutoScrollSuspended(suspended: boolean) {
+      if (autoScrollSuspended === suspended) return;
+      autoScrollSuspended = suspended;
+      if (suspended) {
+        stopAutoScrollTracking();
+      } else if (syncedLines.length > 0) {
+        // Re-center on the active line now that the menu is gone.
+        updateLineClasses(activeLineIndex, { forceCenter: true });
+      }
+    },
     clear,
     destroy() {
       stopTicking();

@@ -621,7 +621,10 @@ export function setup(ctx: SpindleFrontendContext) {
     );
 
     openContextMenuCount += 1;
+    // Suspend any auto-scrolling lyrics — a scroll would dismiss the open menu.
     miniPlayer.setUiSuspended(true);
+    modernWidget.setAutoScrollSuspended(true);
+    lyricsUI.setAutoScrollSuspended(true);
 
     let selectedKey: string | null | undefined;
     try {
@@ -633,6 +636,8 @@ export function setup(ctx: SpindleFrontendContext) {
       openContextMenuCount = Math.max(0, openContextMenuCount - 1);
       if (openContextMenuCount === 0) {
         miniPlayer.setUiSuspended(false);
+        modernWidget.setAutoScrollSuspended(false);
+        lyricsUI.setAutoScrollSuspended(false);
       }
     }
 

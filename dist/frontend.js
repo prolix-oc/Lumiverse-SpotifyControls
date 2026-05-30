@@ -3927,6 +3927,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   let autoScrollTimer = null;
   let isAutoScrolling = false;
   let lastUserScrollAt = 0;
+  let autoScrollSuspended = false;
   let lastMetadataSignature = "";
   let marqueeRefreshTimer = null;
   let marqueeRefreshTimerLate = null;
@@ -4034,6 +4035,8 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     });
     const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];
     if (!activeEl || !shouldAutoscroll)
+      return;
+    if (autoScrollSuspended)
       return;
     const shouldCenter = Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
     if (!shouldCenter)
@@ -4262,6 +4265,16 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     update,
     updateLyrics,
     setLyricsLoading,
+    setAutoScrollSuspended(suspended) {
+      if (autoScrollSuspended === suspended)
+        return;
+      autoScrollSuspended = suspended;
+      if (suspended) {
+        stopAutoScrollTracking();
+      } else if (syncedLyricsModel.hasLyrics()) {
+        updateSyncedLyricsPresentation(true);
+      }
+    },
     setCollapsedSize(size) {
       root.style.setProperty("--spotify-modern-widget-collapsed-size", `${size}px`);
     },
@@ -4338,6 +4351,7 @@ function createLyricsUI(onSeek) {
   let loadingTimer = null;
   let isAutoScrolling = false;
   let lastUserScrollAt = 0;
+  let autoScrollSuspended = false;
   let pendingSeekPositionMs = null;
   let pendingSeekUntil = 0;
   function stopLoadingState() {
@@ -4391,7 +4405,7 @@ function createLyricsUI(onSeek) {
       line.el.className = getLineClassName(line.index, activeLineIndex, Boolean(line.text));
     });
     const activeLine = syncedLines.find((line) => line.index === activeLineIndex);
-    const shouldCenter = options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS2;
+    const shouldCenter = !autoScrollSuspended && (options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS2);
     if (activeLine && shouldCenter) {
       isAutoScrolling = true;
       if (autoScrollTimer)
@@ -4563,6 +4577,16 @@ function createLyricsUI(onSeek) {
     update,
     updatePlayback,
     setLoading,
+    setAutoScrollSuspended(suspended) {
+      if (autoScrollSuspended === suspended)
+        return;
+      autoScrollSuspended = suspended;
+      if (suspended) {
+        stopAutoScrollTracking();
+      } else if (syncedLines.length > 0) {
+        updateLineClasses(activeLineIndex, { forceCenter: true });
+      }
+    },
     clear,
     destroy() {
       stopTicking();
@@ -5435,6 +5459,8 @@ function setup(ctx) {
     items.push({ key: currentMiniPlayerStyle === "modern" ? "div" : "div2", label: "", type: "divider" }, { key: "mini-default", label: "Default Mini Player", active: currentMiniPlayerStyle === "default" }, { key: "mini-modern", label: "Modern Lyrics Mini Player", active: currentMiniPlayerStyle === "modern" });
     openContextMenuCount += 1;
     miniPlayer.setUiSuspended(true);
+    modernWidget.setAutoScrollSuspended(true);
+    lyricsUI.setAutoScrollSuspended(true);
     let selectedKey;
     try {
       ({ selectedKey } = await ctx.ui.showContextMenu({
@@ -5445,6 +5471,8 @@ function setup(ctx) {
       openContextMenuCount = Math.max(0, openContextMenuCount - 1);
       if (openContextMenuCount === 0) {
         miniPlayer.setUiSuspended(false);
+        modernWidget.setAutoScrollSuspended(false);
+        lyricsUI.setAutoScrollSuspended(false);
       }
     }
     if (!selectedKey)

@@ -129,6 +129,7 @@ export interface ModernWidgetPlayerUI {
   update(state: PlaybackState | null, connected: boolean): void;
   updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean): void;
   setLyricsLoading(loading: boolean): void;
+  setAutoScrollSuspended(suspended: boolean): void;
   setCollapsedSize(size: number): void;
   setExpanded(expanded: boolean): void;
   isExpanded(): boolean;
@@ -334,6 +335,7 @@ export function createModernWidgetPlayerUI(
   let autoScrollTimer: ReturnType<typeof setTimeout> | null = null;
   let isAutoScrolling = false;
   let lastUserScrollAt = 0;
+  let autoScrollSuspended = false;
   let lastMetadataSignature = "";
   let marqueeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let marqueeRefreshTimerLate: ReturnType<typeof setTimeout> | null = null;
@@ -448,6 +450,8 @@ export function createModernWidgetPlayerUI(
     const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];
     if (!activeEl || !shouldAutoscroll) return;
 
+    // While a context menu is open, never auto-scroll — a scroll dismisses the menu.
+    if (autoScrollSuspended) return;
     const shouldCenter = Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
     if (!shouldCenter) return;
 
@@ -696,6 +700,16 @@ export function createModernWidgetPlayerUI(
     update,
     updateLyrics,
     setLyricsLoading,
+    setAutoScrollSuspended(suspended: boolean) {
+      if (autoScrollSuspended === suspended) return;
+      autoScrollSuspended = suspended;
+      if (suspended) {
+        stopAutoScrollTracking();
+      } else if (syncedLyricsModel.hasLyrics()) {
+        // Re-center on the active line now that the menu is gone.
+        updateSyncedLyricsPresentation(true);
+      }
+    },
     setCollapsedSize(size: number) {
       root.style.setProperty("--spotify-modern-widget-collapsed-size", `${size}px`);
     },
