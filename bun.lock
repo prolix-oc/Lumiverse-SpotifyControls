@@ -5,13 +5,13 @@
     "": {
       "name": "lumiverse-spotify-controls",
       "devDependencies": {
-        "lumiverse-spindle-types": "0.5.13",
+        "lumiverse-spindle-types": "0.5.26",
         "typescript": "^5.7.3",
       },
     },
   },
   "packages": {
-    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.5.13", "", {}, "sha512-Qs7++k6+NIx22Gr9MbZbQsaxP0gVwxrytHeHRflNvVchkB9a50uiga++E40AZ1onVWxuyq+DrGiQIbzN49lp8A=="],
+    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.5.26", "", {}, "sha512-eeW3EeWPwafuGy/JIFPURAdeFK32Un5fuuiS0FwNIg77ehXpbxucm9QWHxZ4FmSzv1/dipk5zKy4XgPcNahp1A=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
   }
