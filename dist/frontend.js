@@ -5248,6 +5248,10 @@ function createSongBadgeManager(ctx, sendToBackend) {
 var SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 var MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
 var READY_MIN_VERSION = [1, 0, 6];
+var SEEK_COMMIT_GRACE_MS = 1600;
+var SEEK_SETTLE_TOLERANCE_MS = 2200;
+var VOLUME_COMMIT_GRACE_MS = 1200;
+var TRACK_SKIP_GRACE_MS = 4200;
 function parseVersionSegment(segment) {
   if (!segment)
     return 0;
@@ -5312,6 +5316,9 @@ function setup(ctx) {
   cleanups.push(removeStyle);
   let currentState = null;
   let connected = false;
+  let pendingSeekCommit = null;
+  let pendingVolumeCommit = null;
+  let pendingTrackSkip = null;
   const DEFAULT_SIZE_PRESETS = { small: 36, medium: 48, large: 64 };
   const MODERN_SIZE_PRESETS = { small: 112, medium: 128, large: 144 };
   const DEFAULT_WIDGET_SIZE_MIN = 24;
@@ -5401,8 +5408,90 @@ function setup(ctx) {
     const { port } = window.location;
     return `http://127.0.0.1${port ? `:${port}` : ""}`;
   }
+  function clearExpiredOptimisticState(now = Date.now()) {
+    if (pendingSeekCommit && now > pendingSeekCommit.expiresAt)
+      pendingSeekCommit = null;
+    if (pendingVolumeCommit && now > pendingVolumeCommit.expiresAt)
+      pendingVolumeCommit = null;
+    if (pendingTrackSkip && now > pendingTrackSkip.expiresAt)
+      pendingTrackSkip = null;
+  }
+  function getExpectedSeekPositionMs(pending, now = Date.now()) {
+    const elapsed = pending.isPlaying ? Math.max(0, now - pending.committedAt) : 0;
+    return Math.min(pending.positionMs + elapsed, pending.durationMs || Infinity);
+  }
+  function applyOptimisticPlaybackState(state, now = Date.now()) {
+    let nextState = state;
+    if (pendingVolumeCommit) {
+      if (nextState.volume !== null && Math.abs(nextState.volume - pendingVolumeCommit.percent) <= 1) {
+        pendingVolumeCommit = null;
+      } else if (now <= pendingVolumeCommit.expiresAt) {
+        nextState = { ...nextState, volume: pendingVolumeCommit.percent };
+      } else {
+        pendingVolumeCommit = null;
+      }
+    }
+    if (pendingSeekCommit) {
+      if (pendingSeekCommit.trackUri && nextState.trackUri !== pendingSeekCommit.trackUri) {
+        pendingSeekCommit = null;
+      } else {
+        const expectedProgressMs = Math.round(Math.min(getExpectedSeekPositionMs(pendingSeekCommit, now), nextState.durationMs || pendingSeekCommit.durationMs || Infinity));
+        if (Math.abs(nextState.progressMs - expectedProgressMs) <= SEEK_SETTLE_TOLERANCE_MS) {
+          pendingSeekCommit = null;
+        } else if (now <= pendingSeekCommit.expiresAt) {
+          nextState = { ...nextState, progressMs: expectedProgressMs };
+        } else {
+          pendingSeekCommit = null;
+        }
+      }
+    }
+    return nextState;
+  }
+  function reconcilePlaybackState(nextState) {
+    const now = Date.now();
+    clearExpiredOptimisticState(now);
+    if (!nextState) {
+      if (pendingTrackSkip && currentState) {
+        return applyOptimisticPlaybackState(currentState, now);
+      }
+      return null;
+    }
+    if (pendingTrackSkip) {
+      if (!pendingTrackSkip.trackUri || nextState.trackUri !== pendingTrackSkip.trackUri || now > pendingTrackSkip.expiresAt) {
+        pendingTrackSkip = null;
+      }
+    }
+    return applyOptimisticPlaybackState(nextState, now);
+  }
   function sendToBackend(msg) {
-    ctx.sendToBackend(msg);
+    const backendMsg = msg;
+    const now = Date.now();
+    switch (backendMsg.type) {
+      case "seek":
+        pendingSeekCommit = {
+          committedAt: now,
+          durationMs: currentState?.durationMs ?? backendMsg.positionMs,
+          expiresAt: now + SEEK_COMMIT_GRACE_MS,
+          isPlaying: currentState?.isPlaying ?? false,
+          positionMs: backendMsg.positionMs,
+          trackUri: currentState?.trackUri ?? null
+        };
+        break;
+      case "set_volume":
+        pendingVolumeCommit = {
+          expiresAt: now + VOLUME_COMMIT_GRACE_MS,
+          percent: backendMsg.percent
+        };
+        break;
+      case "next":
+      case "previous":
+        pendingTrackSkip = {
+          expiresAt: now + TRACK_SKIP_GRACE_MS,
+          trackUri: currentState?.trackUri ?? null
+        };
+        break;
+    }
+    ctx.sendToBackend(backendMsg);
   }
   let lastThemeArtUrl = null;
   let themeApplySeq = 0;
@@ -5996,7 +6085,7 @@ function setup(ctx) {
     switch (msg.type) {
       case "state": {
         const hadPlayback = !!currentState;
-        currentState = msg.playbackState;
+        currentState = reconcilePlaybackState(msg.playbackState);
         connected = msg.connected;
         syncWidgetVisibility();
         nowPlayingUI.update(currentState, connected);
@@ -6100,6 +6189,9 @@ function setup(ctx) {
         sendToBackend({ type: "get_state" });
         break;
       case "disconnected":
+        pendingSeekCommit = null;
+        pendingVolumeCommit = null;
+        pendingTrackSkip = null;
         connected = false;
         syncWidgetVisibility();
         currentState = null;
