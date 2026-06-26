@@ -2,6 +2,11 @@ declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
 import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle, PlaybackState, SongSnapshot, MessageSongEntry } from "./types";
 import * as spotify from "./spotify-api";
+import {
+  createLyricsRequestCoordinator,
+  type LyricsRequestCoordinator,
+  type LyricsRequestTrack,
+} from "./lyrics-request-coordinator";
 
 // ─── State ───────────────────────────────────────────────────────────────
 
@@ -22,15 +27,13 @@ type UserSession = {
   nullStateRetries: number;
   lastState: PlaybackState | null;
   lastStateUpdatedAt: number;
-  cachedLyrics: {
-    trackUri: string;
-    data: spotify.LyricsData | null;
-  } | null;
+  lyricsRequests: LyricsRequestCoordinator<spotify.LyricsData>;
   initialized: boolean;
 };
 
 const sessions = new Map<string, UserSession>();
 const pendingOAuthByState = new Map<string, PendingOAuth>();
+const LYRICS_CACHE_ENTRIES = 24;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -47,7 +50,16 @@ function getSession(userId: string): UserSession {
       nullStateRetries: 0,
       lastState: null,
       lastStateUpdatedAt: 0,
-      cachedLyrics: null,
+      lyricsRequests: createLyricsRequestCoordinator(
+        (track) => spotify.getLyrics(
+          track.trackName,
+          track.artistName,
+          track.albumName,
+          track.durationMs / 1000,
+          userId,
+        ),
+        LYRICS_CACHE_ENTRIES,
+      ),
       initialized: false,
     };
     sessions.set(userId, session);
@@ -260,8 +272,64 @@ async function loadCachedState(userId: string): Promise<void> {
   if (activeUserId === userId) syncActiveUserState(userId);
 }
 
+function buildLyricsRequestTrack(state: PlaybackState): LyricsRequestTrack {
+  return {
+    trackUri: state.trackUri,
+    trackName: state.trackName,
+    artistName: state.artistName,
+    albumName: state.albumName,
+    durationMs: state.durationMs,
+  };
+}
+
+function getCachedLyricsForTrack(userId: string, trackUri: string): spotify.LyricsData | null | undefined {
+  return getSession(userId).lyricsRequests.peek(trackUri);
+}
+
+async function getLyricsForState(state: PlaybackState, userId: string): Promise<spotify.LyricsData | null> {
+  const lyrics = await getSession(userId).lyricsRequests.get(buildLyricsRequestTrack(state));
+  if (getSession(userId).lastState?.trackUri === state.trackUri) {
+    pushLyricsMacros(lyrics);
+  }
+  return lyrics;
+}
+
+function prefetchLyricsForState(userId: string, state: PlaybackState | null): void {
+  if (!state?.trackUri) return;
+
+  const cachedLyrics = getCachedLyricsForTrack(userId, state.trackUri);
+  if (cachedLyrics !== undefined) {
+    if (getSession(userId).lastState?.trackUri === state.trackUri) {
+      pushLyricsMacros(cachedLyrics);
+    }
+    return;
+  }
+
+  void getLyricsForState(state, userId);
+}
+
+function syncLyricsForTrackChange(userId: string, previousTrackUri: string | null, state: PlaybackState | null): void {
+  const nextTrackUri = state?.trackUri ?? null;
+  if (nextTrackUri === previousTrackUri) return;
+
+  if (!nextTrackUri) {
+    pushLyricsMacros(null);
+    return;
+  }
+
+  const cachedLyrics = getCachedLyricsForTrack(userId, nextTrackUri);
+  if (cachedLyrics !== undefined) {
+    pushLyricsMacros(cachedLyrics);
+    return;
+  }
+
+  pushLyricsMacros(null);
+  prefetchLyricsForState(userId, state);
+}
+
 async function cacheState(userId: string, state: PlaybackState | null): Promise<void> {
   const session = getSession(userId);
+  const previousTrackUri = session.lastState?.trackUri ?? null;
   session.lastState = state;
   session.lastStateUpdatedAt = state ? Date.now() : 0;
   if (activeUserId === userId) syncActiveUserState(userId);
@@ -272,6 +340,7 @@ async function cacheState(userId: string, state: PlaybackState | null): Promise<
     await spindle.userStorage.delete("last_state.json", userId).catch(() => {});
   }
   pushPlaybackMacros(state);
+  syncLyricsForTrackChange(userId, previousTrackUri, state);
 }
 
 // ─── Permission-aware polling ────────────────────────────────────────────
@@ -566,7 +635,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         await spotify.clearTokens(userId);
         await (spindle.theme as typeof spindle.theme & { clear(targetUserId?: string): Promise<void> }).clear(userId).catch(() => {});
         const session = getSession(userId);
-        session.cachedLyrics = null;
+        session.lyricsRequests.clear();
         await cacheState(userId, null);
         if (activeUserId === userId) {
           activeUserId = null;
@@ -675,15 +744,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
 
       case "get_lyrics": {
-        const trackUri = getSession(userId).lastState?.trackUri || "";
-        const lyrics = await getLyricsForCurrentTrack(userId);
-        send({
-          type: "lyrics",
-          trackUri,
-          plainLyrics: lyrics?.plainLyrics || null,
-          syncedLyrics: lyrics?.syncedLyrics || null,
-          instrumental: !!lyrics?.instrumental,
-        }, userId);
+        void sendLyricsForCurrentTrack(userId);
         break;
       }
 
@@ -707,28 +768,48 @@ spindle.onFrontendMessage(async (raw, userId) => {
 async function getLyricsForCurrentTrack(userId?: string): Promise<spotify.LyricsData | null> {
   const resolvedUserId = userId || activeUserId || undefined;
   if (!resolvedUserId || !spotify.isConnected(resolvedUserId)) return null;
-  const session = getSession(resolvedUserId);
   try {
+    const session = getSession(resolvedUserId);
     const state = session.lastState || await spotify.getCurrentPlayback(resolvedUserId);
-    if (!state) return null;
+    if (!state?.trackUri) return null;
 
-    if (session.cachedLyrics && session.cachedLyrics.trackUri === state.trackUri) {
-      return session.cachedLyrics.data;
-    }
-
-    const data = await spotify.getLyrics(
-      state.trackName,
-      state.artistName,
-      state.albumName,
-      state.durationMs / 1000,
-      resolvedUserId,
-    );
-    session.cachedLyrics = { trackUri: state.trackUri, data };
-    if (activeUserId === resolvedUserId) syncActiveUserState(resolvedUserId);
-    pushLyricsMacros(data);
-    return data;
+    return getLyricsForState(state, resolvedUserId);
   } catch {
     return null;
+  }
+}
+
+async function sendLyricsForCurrentTrack(userId: string): Promise<void> {
+  try {
+    const session = getSession(userId);
+    const state = session.lastState || await spotify.getCurrentPlayback(userId);
+    if (!state?.trackUri) {
+      send({
+        type: "lyrics",
+        trackUri: "",
+        plainLyrics: null,
+        syncedLyrics: null,
+        instrumental: false,
+      }, userId);
+      return;
+    }
+
+    const lyrics = await getLyricsForState(state, userId);
+    send({
+      type: "lyrics",
+      trackUri: state.trackUri,
+      plainLyrics: lyrics?.plainLyrics || null,
+      syncedLyrics: lyrics?.syncedLyrics || null,
+      instrumental: !!lyrics?.instrumental,
+    }, userId);
+  } catch {
+    send({
+      type: "lyrics",
+      trackUri: getSession(userId).lastState?.trackUri || "",
+      plainLyrics: null,
+      syncedLyrics: null,
+      instrumental: false,
+    }, userId);
   }
 }
 

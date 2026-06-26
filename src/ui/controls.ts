@@ -1,4 +1,5 @@
 import type { PlaybackState } from "../types";
+import { bindRangeCommitOnRelease } from "./release-commit";
 
 // SVG icons
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
@@ -92,25 +93,30 @@ export function createControlsUI(
     sendToBackend({ type: "set_repeat", mode: nextMode });
   });
 
-  let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
+  let isVolumeInteracting = false;
   const volumeChangeHandlers = new Set<(percent: number) => void>();
-  volumeSlider.addEventListener("input", () => {
-    const percent = parseInt(volumeSlider.value, 10);
-    for (const h of volumeChangeHandlers) h(percent);
-    if (volumeDebounce) clearTimeout(volumeDebounce);
-    volumeDebounce = setTimeout(() => {
+  const cleanupVolumeCommit = bindRangeCommitOnRelease(volumeSlider, {
+    onInteractChange(active) {
+      isVolumeInteracting = active;
+    },
+    onPreview(percent) {
+      for (const handler of volumeChangeHandlers) handler(percent);
+    },
+    onCommit(percent) {
       sendToBackend({ type: "set_volume", percent });
-    }, 200);
+    },
   });
 
   function update(state: PlaybackState | null, connected: boolean) {
     if (!connected) {
+      isVolumeInteracting = false;
       root.style.display = "none";
       return;
     }
     root.style.display = "";
 
     if (!state) {
+      isVolumeInteracting = false;
       isPlaying = false;
       playPauseBtn.innerHTML = ICON_PLAY;
       shuffleBtn.classList.remove("active");
@@ -128,7 +134,7 @@ export function createControlsUI(
     repeatBtn.classList.toggle("active", currentRepeat !== "off");
     repeatBtn.innerHTML = currentRepeat === "track" ? ICON_REPEAT_ONE : ICON_REPEAT;
 
-    if (state.volume !== null) {
+    if (state.volume !== null && !isVolumeInteracting) {
       volumeSlider.value = String(state.volume);
     }
   }
@@ -143,7 +149,7 @@ export function createControlsUI(
       volumeChangeHandlers.add(handler);
     },
     destroy() {
-      if (volumeDebounce) clearTimeout(volumeDebounce);
+      cleanupVolumeCommit();
       volumeChangeHandlers.clear();
       root.remove();
     },

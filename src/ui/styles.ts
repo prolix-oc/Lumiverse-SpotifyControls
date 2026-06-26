@@ -923,6 +923,8 @@ export const PANEL_CSS = `
   scroll-padding-top: 36%;
   scroll-padding-bottom: 24px;
   overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);

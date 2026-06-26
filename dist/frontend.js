@@ -924,6 +924,8 @@ var PANEL_CSS = `
   scroll-padding-top: 36%;
   scroll-padding-bottom: 24px;
   overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--lumiverse-fill-strong) transparent;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
@@ -2525,6 +2527,196 @@ function createCrossfadeArt(className) {
   };
 }
 
+// src/ui/release-commit.ts
+function bindRangeCommitOnRelease(input, options) {
+  let interacting = false;
+  function setInteracting(active) {
+    if (interacting === active)
+      return;
+    interacting = active;
+    options.onInteractChange?.(active);
+  }
+  function stopEvent(event) {
+    if (options.stopPropagation)
+      event.stopPropagation();
+  }
+  function readValue() {
+    return Number.parseInt(input.value, 10);
+  }
+  const handlePointerDown = (event) => {
+    stopEvent(event);
+    setInteracting(true);
+  };
+  const handlePointerMove = (event) => {
+    stopEvent(event);
+  };
+  const handlePointerUp = (event) => {
+    stopEvent(event);
+    setInteracting(false);
+  };
+  const handleTouchStart = (event) => {
+    stopEvent(event);
+    setInteracting(true);
+  };
+  const handleTouchMove = (event) => {
+    stopEvent(event);
+  };
+  const handleTouchEnd = (event) => {
+    stopEvent(event);
+    setInteracting(false);
+  };
+  const handleClick = (event) => {
+    stopEvent(event);
+  };
+  const handleInput = (event) => {
+    stopEvent(event);
+    setInteracting(true);
+    options.onPreview?.(readValue());
+  };
+  const handleChange = (event) => {
+    stopEvent(event);
+    const value = readValue();
+    options.onPreview?.(value);
+    options.onCommit(value);
+    setInteracting(false);
+  };
+  const handleCancel = () => {
+    setInteracting(false);
+  };
+  input.addEventListener("pointerdown", handlePointerDown);
+  input.addEventListener("pointermove", handlePointerMove);
+  input.addEventListener("pointerup", handlePointerUp);
+  input.addEventListener("touchstart", handleTouchStart, { passive: true });
+  input.addEventListener("touchmove", handleTouchMove, { passive: true });
+  input.addEventListener("touchend", handleTouchEnd, { passive: true });
+  input.addEventListener("click", handleClick);
+  input.addEventListener("input", handleInput);
+  input.addEventListener("change", handleChange);
+  input.addEventListener("blur", handleCancel);
+  input.addEventListener("pointercancel", handleCancel);
+  input.addEventListener("lostpointercapture", handleCancel);
+  return () => {
+    input.removeEventListener("pointerdown", handlePointerDown);
+    input.removeEventListener("pointermove", handlePointerMove);
+    input.removeEventListener("pointerup", handlePointerUp);
+    input.removeEventListener("touchstart", handleTouchStart);
+    input.removeEventListener("touchmove", handleTouchMove);
+    input.removeEventListener("touchend", handleTouchEnd);
+    input.removeEventListener("click", handleClick);
+    input.removeEventListener("input", handleInput);
+    input.removeEventListener("change", handleChange);
+    input.removeEventListener("blur", handleCancel);
+    input.removeEventListener("pointercancel", handleCancel);
+    input.removeEventListener("lostpointercapture", handleCancel);
+  };
+}
+function bindProgressCommitOnRelease(bar, options) {
+  let interacting = false;
+  let activePointerId = null;
+  let previewValue = 0;
+  function setInteracting(active) {
+    if (interacting === active)
+      return;
+    interacting = active;
+    options.onInteractChange?.(active);
+  }
+  function stopEvent(event) {
+    if (options.stopPropagation)
+      event.stopPropagation();
+  }
+  function readValueFromClientX(clientX) {
+    const maxValue = options.getMaxValue();
+    if (!Number.isFinite(maxValue) || maxValue <= 0)
+      return null;
+    const rect = bar.getBoundingClientRect();
+    if (rect.width <= 0)
+      return null;
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return Math.round(pct * maxValue);
+  }
+  function previewAt(clientX) {
+    const nextValue = readValueFromClientX(clientX);
+    if (nextValue === null)
+      return null;
+    previewValue = nextValue;
+    options.onPreview(nextValue);
+    return nextValue;
+  }
+  function endInteraction(commit) {
+    if (activePointerId !== null && bar.hasPointerCapture(activePointerId)) {
+      bar.releasePointerCapture(activePointerId);
+    }
+    activePointerId = null;
+    if (commit) {
+      options.onCommit(previewValue);
+    }
+    setInteracting(false);
+  }
+  const handlePointerDown = (event) => {
+    stopEvent(event);
+    if (event.button !== 0)
+      return;
+    const nextValue = previewAt(event.clientX);
+    if (nextValue === null)
+      return;
+    activePointerId = event.pointerId;
+    setInteracting(true);
+    try {
+      bar.setPointerCapture(event.pointerId);
+    } catch {}
+  };
+  const handlePointerMove = (event) => {
+    stopEvent(event);
+    if (event.pointerId !== activePointerId)
+      return;
+    previewAt(event.clientX);
+  };
+  const handlePointerUp = (event) => {
+    stopEvent(event);
+    if (event.pointerId !== activePointerId)
+      return;
+    previewAt(event.clientX);
+    endInteraction(true);
+  };
+  const handlePointerCancel = (event) => {
+    stopEvent(event);
+    if (event.pointerId !== activePointerId)
+      return;
+    endInteraction(false);
+  };
+  const handleClick = (event) => {
+    stopEvent(event);
+    event.preventDefault();
+  };
+  const handleTouchStart = (event) => {
+    stopEvent(event);
+  };
+  const handleTouchMove = (event) => {
+    stopEvent(event);
+  };
+  const handleTouchEnd = (event) => {
+    stopEvent(event);
+  };
+  bar.addEventListener("pointerdown", handlePointerDown);
+  bar.addEventListener("pointermove", handlePointerMove);
+  bar.addEventListener("pointerup", handlePointerUp);
+  bar.addEventListener("pointercancel", handlePointerCancel);
+  bar.addEventListener("click", handleClick);
+  bar.addEventListener("touchstart", handleTouchStart, { passive: true });
+  bar.addEventListener("touchmove", handleTouchMove, { passive: true });
+  bar.addEventListener("touchend", handleTouchEnd, { passive: true });
+  return () => {
+    bar.removeEventListener("pointerdown", handlePointerDown);
+    bar.removeEventListener("pointermove", handlePointerMove);
+    bar.removeEventListener("pointerup", handlePointerUp);
+    bar.removeEventListener("pointercancel", handlePointerCancel);
+    bar.removeEventListener("click", handleClick);
+    bar.removeEventListener("touchstart", handleTouchStart);
+    bar.removeEventListener("touchmove", handleTouchMove);
+    bar.removeEventListener("touchend", handleTouchEnd);
+  };
+}
+
 // src/ui/now-playing.ts
 function formatTime(ms) {
   const totalSec = Math.floor(ms / 1000);
@@ -2575,6 +2767,7 @@ function createNowPlayingUI(onSeek) {
   const emptyState = document.createElement("div");
   emptyState.className = "spotify-empty";
   let currentDuration = 0;
+  let isProgressScrubbing = false;
   let lastProgressMs = 0;
   let lastUpdateTime = 0;
   let lastIsPlaying = false;
@@ -2582,6 +2775,10 @@ function createNowPlayingUI(onSeek) {
   function tickProgress() {
     if (!lastIsPlaying || !currentDuration) {
       animFrameId = null;
+      return;
+    }
+    if (isProgressScrubbing) {
+      animFrameId = requestAnimationFrame(tickProgress);
       return;
     }
     const elapsed = Date.now() - lastUpdateTime;
@@ -2602,14 +2799,26 @@ function createNowPlayingUI(onSeek) {
       animFrameId = null;
     }
   }
-  progressBar.addEventListener("click", (e) => {
-    if (!currentDuration)
-      return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    onSeek(Math.round(pct * currentDuration));
+  const cleanupProgressCommit = bindProgressCommitOnRelease(progressBar, {
+    getMaxValue: () => currentDuration,
+    onInteractChange(active) {
+      isProgressScrubbing = active;
+    },
+    onPreview(positionMs) {
+      const pct = currentDuration > 0 ? positionMs / currentDuration * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime(positionMs);
+    },
+    onCommit(positionMs) {
+      lastProgressMs = positionMs;
+      lastUpdateTime = Date.now();
+      onSeek(positionMs);
+      if (lastIsPlaying)
+        startTicking();
+    }
   });
   function showEmpty(message) {
+    isProgressScrubbing = false;
     art.setUrl(null);
     container.style.display = "none";
     progressContainer.style.display = "none";
@@ -2646,12 +2855,16 @@ function createNowPlayingUI(onSeek) {
     }
     currentDuration = state.durationMs;
     art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
-    lastProgressMs = state.progressMs;
-    lastUpdateTime = Date.now();
     lastIsPlaying = state.isPlaying;
-    const pct = state.durationMs > 0 ? state.progressMs / state.durationMs * 100 : 0;
-    progressFill.style.width = `${pct}%`;
-    progressTime.textContent = formatTime(state.progressMs);
+    if (!isProgressScrubbing) {
+      lastProgressMs = state.progressMs;
+      lastUpdateTime = Date.now();
+    }
+    if (!isProgressScrubbing) {
+      const pct = state.durationMs > 0 ? state.progressMs / state.durationMs * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime(state.progressMs);
+    }
     durationTime.textContent = formatTime(state.durationMs);
     if (state.isPlaying) {
       startTicking();
@@ -2664,6 +2877,7 @@ function createNowPlayingUI(onSeek) {
     root,
     update,
     destroy() {
+      cleanupProgressCommit();
       stopTicking();
       art.destroy();
       root.remove();
@@ -2735,25 +2949,29 @@ function createControlsUI(sendToBackend) {
     const nextMode = currentRepeat === "off" ? "context" : currentRepeat === "context" ? "track" : "off";
     sendToBackend({ type: "set_repeat", mode: nextMode });
   });
-  let volumeDebounce = null;
+  let isVolumeInteracting = false;
   const volumeChangeHandlers = new Set;
-  volumeSlider.addEventListener("input", () => {
-    const percent = parseInt(volumeSlider.value, 10);
-    for (const h of volumeChangeHandlers)
-      h(percent);
-    if (volumeDebounce)
-      clearTimeout(volumeDebounce);
-    volumeDebounce = setTimeout(() => {
+  const cleanupVolumeCommit = bindRangeCommitOnRelease(volumeSlider, {
+    onInteractChange(active) {
+      isVolumeInteracting = active;
+    },
+    onPreview(percent) {
+      for (const handler of volumeChangeHandlers)
+        handler(percent);
+    },
+    onCommit(percent) {
       sendToBackend({ type: "set_volume", percent });
-    }, 200);
+    }
   });
   function update(state, connected) {
     if (!connected) {
+      isVolumeInteracting = false;
       root.style.display = "none";
       return;
     }
     root.style.display = "";
     if (!state) {
+      isVolumeInteracting = false;
       isPlaying = false;
       playPauseBtn.innerHTML = ICON_PLAY;
       shuffleBtn.classList.remove("active");
@@ -2767,7 +2985,7 @@ function createControlsUI(sendToBackend) {
     currentRepeat = state.repeatState;
     repeatBtn.classList.toggle("active", currentRepeat !== "off");
     repeatBtn.innerHTML = currentRepeat === "track" ? ICON_REPEAT_ONE : ICON_REPEAT;
-    if (state.volume !== null) {
+    if (state.volume !== null && !isVolumeInteracting) {
       volumeSlider.value = String(state.volume);
     }
   }
@@ -2781,8 +2999,7 @@ function createControlsUI(sendToBackend) {
       volumeChangeHandlers.add(handler);
     },
     destroy() {
-      if (volumeDebounce)
-        clearTimeout(volumeDebounce);
+      cleanupVolumeCommit();
       volumeChangeHandlers.clear();
       root.remove();
     }
@@ -3177,6 +3394,8 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
   let pendingPlaybackRefresh = null;
   let pendingDevices = null;
   let pendingVolume = null;
+  let isProgressScrubbing = false;
+  let isVolumeInteracting = false;
   function setLyricsStatus(message, loading = false) {
     lyricsStatus.className = loading ? "spotify-mini-lyrics-status spotify-mini-lyrics-status-loading" : "spotify-mini-lyrics-status";
     lyricsStatus.textContent = message;
@@ -3325,6 +3544,10 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       animFrameId = null;
       return;
     }
+    if (isProgressScrubbing) {
+      animFrameId = requestAnimationFrame(tickProgress);
+      return;
+    }
     const elapsed = Date.now() - lastUpdateTime;
     const interpolated = Math.min(lastProgressMs + elapsed, currentDuration);
     const pct = interpolated / currentDuration * 100;
@@ -3365,26 +3588,40 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     e.stopPropagation();
     hide();
   });
-  progressBar.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (!currentDuration)
-      return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    sendToBackend({ type: "seek", positionMs: Math.round(pct * currentDuration) });
+  const cleanupProgressCommit = bindProgressCommitOnRelease(progressBar, {
+    getMaxValue: () => currentDuration,
+    onInteractChange(active) {
+      isProgressScrubbing = active;
+    },
+    onPreview(positionMs) {
+      const pct = currentDuration > 0 ? positionMs / currentDuration * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime2(positionMs);
+    },
+    onCommit(positionMs) {
+      if (currentState) {
+        currentState = { ...currentState, progressMs: positionMs };
+      }
+      lastProgressMs = positionMs;
+      lastUpdateTime = Date.now();
+      updateActiveLyricLine(true);
+      sendToBackend({ type: "seek", positionMs });
+      if (visible && lastIsPlaying)
+        startTicking();
+    }
   });
-  let volumeDebounce = null;
   const volumeChangeHandlers = new Set;
-  volumeSlider.addEventListener("input", (e) => {
-    e.stopPropagation();
-    const percent = parseInt(volumeSlider.value, 10);
-    for (const h of volumeChangeHandlers)
-      h(percent);
-    if (volumeDebounce)
-      clearTimeout(volumeDebounce);
-    volumeDebounce = setTimeout(() => {
+  const cleanupVolumeCommit = bindRangeCommitOnRelease(volumeSlider, {
+    onInteractChange(active) {
+      isVolumeInteracting = active;
+    },
+    onPreview(percent) {
+      for (const handler of volumeChangeHandlers)
+        handler(percent);
+    },
+    onCommit(percent) {
       sendToBackend({ type: "set_volume", percent });
-    }, 200);
+    }
   });
   let deviceListOpen = false;
   let currentDeviceId = null;
@@ -3499,6 +3736,8 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
       return;
     }
     if (!connected || !state) {
+      isProgressScrubbing = false;
+      isVolumeInteracting = false;
       art.setUrl(null);
       header.style.display = "none";
       progressRow.style.display = "none";
@@ -3536,14 +3775,16 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
     isPlaying = state.isPlaying;
     lastIsPlaying = state.isPlaying;
-    lastProgressMs = state.progressMs;
-    lastUpdateTime = Date.now();
     playPauseBtn.innerHTML = isPlaying ? ICON_PAUSE2 : ICON_PLAY2;
-    const pct = state.durationMs > 0 ? state.progressMs / state.durationMs * 100 : 0;
-    progressFill.style.width = `${pct}%`;
-    progressTime.textContent = formatTime2(state.progressMs);
+    if (!isProgressScrubbing) {
+      lastProgressMs = state.progressMs;
+      lastUpdateTime = Date.now();
+      const pct = state.durationMs > 0 ? state.progressMs / state.durationMs * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime2(state.progressMs);
+    }
     durationTime.textContent = formatTime2(state.durationMs);
-    if (state.volume !== null) {
+    if (state.volume !== null && !isVolumeInteracting) {
       volumeSlider.value = String(state.volume);
     }
     if (visible && isPlaying) {
@@ -3653,8 +3894,8 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
     destroy() {
       hide();
       stopTicking();
-      if (volumeDebounce)
-        clearTimeout(volumeDebounce);
+      cleanupProgressCommit();
+      cleanupVolumeCommit();
       volumeChangeHandlers.clear();
       root.remove();
     }
@@ -3685,6 +3926,11 @@ function getCompactPlainLyricLines2(lyrics) {
 }
 function stopEventPropagation(el) {
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
+  el.addEventListener("pointermove", (e) => e.stopPropagation());
+  el.addEventListener("pointerup", (e) => e.stopPropagation());
+  el.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+  el.addEventListener("touchmove", (e) => e.stopPropagation(), { passive: true });
+  el.addEventListener("touchend", (e) => e.stopPropagation(), { passive: true });
   el.addEventListener("click", (e) => e.stopPropagation());
 }
 function createMarqueeLabel(baseClass) {
@@ -3908,6 +4154,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   root.appendChild(compact);
   root.appendChild(expanded);
   [progressBar, prevBtn, playPauseBtn, nextBtn, volumeSlider].forEach((el) => stopEventPropagation(el));
+  stopEventPropagation(lyricsBody);
   let connected = false;
   let state = null;
   let isExpandedState = false;
@@ -3921,7 +4168,6 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   let plainLyricLines = [];
   let lyricsInstrumental = false;
   let lyricsLoading = false;
-  let volumeDebounce = null;
   let lastRenderedLyricSignature = "";
   let syncedLyricEls = [];
   let autoScrollTimer = null;
@@ -3931,6 +4177,8 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   let lastMetadataSignature = "";
   let marqueeRefreshTimer = null;
   let marqueeRefreshTimerLate = null;
+  let isProgressScrubbing = false;
+  let isVolumeInteracting = false;
   const marqueeObserver = new ResizeObserver(() => {
     refreshMarquees(false);
   });
@@ -4135,6 +4383,10 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       animFrameId = null;
       return;
     }
+    if (isProgressScrubbing) {
+      animFrameId = requestAnimationFrame(tickProgress);
+      return;
+    }
     const interpolated = getInterpolatedProgressMs();
     const pct = currentDuration > 0 ? interpolated / currentDuration * 100 : 0;
     progressFill.style.width = `${pct}%`;
@@ -4157,24 +4409,46 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   prevBtn.addEventListener("click", () => sendToBackend({ type: "previous" }));
   nextBtn.addEventListener("click", () => sendToBackend({ type: "next" }));
   playPauseBtn.addEventListener("click", () => sendToBackend({ type: state?.isPlaying ? "pause" : "play" }));
-  progressBar.addEventListener("click", (e) => {
-    if (!currentDuration)
-      return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    sendToBackend({ type: "seek", positionMs: Math.round(pct * currentDuration) });
+  const cleanupProgressCommit = bindProgressCommitOnRelease(progressBar, {
+    getMaxValue: () => currentDuration,
+    onInteractChange(active) {
+      isProgressScrubbing = active;
+    },
+    onPreview(positionMs) {
+      const pct = currentDuration > 0 ? positionMs / currentDuration * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      setCompactProgress(pct, currentDuration > 0);
+      progressTime.textContent = formatTime3(positionMs);
+    },
+    onCommit(positionMs) {
+      if (state) {
+        state = { ...state, progressMs: positionMs };
+      }
+      lastProgressMs = positionMs;
+      lastUpdateTime = Date.now();
+      updateActiveLyricLine(true);
+      sendToBackend({ type: "seek", positionMs });
+      if (lastIsPlaying)
+        startTicking();
+    },
+    stopPropagation: true
   });
-  volumeSlider.addEventListener("input", () => {
-    const percent = parseInt(volumeSlider.value, 10);
-    if (volumeDebounce)
-      clearTimeout(volumeDebounce);
-    volumeDebounce = setTimeout(() => sendToBackend({ type: "set_volume", percent }), 160);
+  const cleanupVolumeCommit = bindRangeCommitOnRelease(volumeSlider, {
+    onInteractChange(active) {
+      isVolumeInteracting = active;
+    },
+    onCommit(percent) {
+      sendToBackend({ type: "set_volume", percent });
+    },
+    stopPropagation: true
   });
   function update(playbackState, isConnected) {
     state = playbackState;
     connected = isConnected;
     root.dataset.empty = !playbackState ? "true" : "false";
     if (!isConnected || !playbackState) {
+      isProgressScrubbing = false;
+      isVolumeInteracting = false;
       eyebrow.textContent = isConnected ? "Standby" : "Connect Spotify";
       compactStatus.textContent = isConnected ? "No playback" : "Connect Spotify";
       emptyState.style.display = "grid";
@@ -4210,22 +4484,26 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     volumeRow.style.display = "flex";
     emptyState.style.display = "none";
     currentDuration = playbackState.durationMs;
-    lastProgressMs = playbackState.progressMs;
-    lastUpdateTime = Date.now();
     lastIsPlaying = playbackState.isPlaying;
     syncedLyricsModel.setPlayback({
       trackUri: playbackState.trackUri,
-      progressMs: playbackState.progressMs,
+      progressMs: isProgressScrubbing ? lastProgressMs : playbackState.progressMs,
       durationMs: playbackState.durationMs,
       isPlaying: playbackState.isPlaying,
-      updatedAt: lastUpdateTime
+      updatedAt: isProgressScrubbing ? lastUpdateTime : Date.now()
     });
     playPauseBtn.innerHTML = playbackState.isPlaying ? ICON_PAUSE3 : ICON_PLAY3;
-    volumeSlider.value = String(playbackState.volume ?? Number(volumeSlider.value));
-    const pct = playbackState.durationMs > 0 ? playbackState.progressMs / playbackState.durationMs * 100 : 0;
-    progressFill.style.width = `${pct}%`;
-    setCompactProgress(pct, playbackState.durationMs > 0);
-    progressTime.textContent = formatTime3(playbackState.progressMs);
+    if (!isVolumeInteracting) {
+      volumeSlider.value = String(playbackState.volume ?? Number(volumeSlider.value));
+    }
+    if (!isProgressScrubbing) {
+      lastProgressMs = playbackState.progressMs;
+      lastUpdateTime = Date.now();
+      const pct = playbackState.durationMs > 0 ? playbackState.progressMs / playbackState.durationMs * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      setCompactProgress(pct, playbackState.durationMs > 0);
+      progressTime.textContent = formatTime3(playbackState.progressMs);
+    }
     durationTime.textContent = formatTime3(playbackState.durationMs);
     if (syncedLyricsModel.hasLyrics() && playbackState.trackUri === lyricsTrackUri) {
       if (syncedLyricEls.length === 0)
@@ -4289,8 +4567,8 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     destroy() {
       stopTicking();
       stopAutoScrollTracking();
-      if (volumeDebounce)
-        clearTimeout(volumeDebounce);
+      cleanupProgressCommit();
+      cleanupVolumeCommit();
       if (marqueeRefreshTimer)
         clearTimeout(marqueeRefreshTimer);
       if (marqueeRefreshTimerLate)
@@ -5378,9 +5656,11 @@ function setup(ctx) {
     requestAnimationFrame(() => clampWidgetPosition(getWidgetLayoutSize()));
   }
   function applyWidgetStyle() {
-    widget.root.style.touchAction = "none";
+    const touchAction = currentMiniPlayerStyle === "modern" && modernWidgetExpanded ? "pan-y" : "none";
+    widget.root.style.touchAction = touchAction;
     widget.root.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
+    widgetContent.style.touchAction = touchAction;
     modernWidget.setCollapsedSize(currentWidgetSize);
     if (currentMiniPlayerStyle === "modern") {
       const size = getWidgetLayoutSize();

@@ -1,5 +1,6 @@
 import type { PlaybackState } from "../types";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
+import { bindProgressCommitOnRelease } from "./release-commit";
 
 export interface NowPlayingUI {
   root: HTMLElement;
@@ -77,6 +78,7 @@ export function createNowPlayingUI(
   emptyState.className = "spotify-empty";
 
   let currentDuration = 0;
+  let isProgressScrubbing = false;
 
   // Client-side progress interpolation
   let lastProgressMs = 0;
@@ -87,6 +89,10 @@ export function createNowPlayingUI(
   function tickProgress() {
     if (!lastIsPlaying || !currentDuration) {
       animFrameId = null;
+      return;
+    }
+    if (isProgressScrubbing) {
+      animFrameId = requestAnimationFrame(tickProgress);
       return;
     }
     const elapsed = Date.now() - lastUpdateTime;
@@ -109,14 +115,26 @@ export function createNowPlayingUI(
     }
   }
 
-  progressBar.addEventListener("click", (e) => {
-    if (!currentDuration) return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    onSeek(Math.round(pct * currentDuration));
+  const cleanupProgressCommit = bindProgressCommitOnRelease(progressBar, {
+    getMaxValue: () => currentDuration,
+    onInteractChange(active) {
+      isProgressScrubbing = active;
+    },
+    onPreview(positionMs) {
+      const pct = currentDuration > 0 ? (positionMs / currentDuration) * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime(positionMs);
+    },
+    onCommit(positionMs) {
+      lastProgressMs = positionMs;
+      lastUpdateTime = Date.now();
+      onSeek(positionMs);
+      if (lastIsPlaying) startTicking();
+    },
   });
 
   function showEmpty(message: string) {
+    isProgressScrubbing = false;
     art.setUrl(null);
     container.style.display = "none";
     progressContainer.style.display = "none";
@@ -157,13 +175,17 @@ export function createNowPlayingUI(
 
     art.setUrl(getTrackScopedArtUrl(state.albumArtUrl, state.trackUri));
 
-    lastProgressMs = state.progressMs;
-    lastUpdateTime = Date.now();
     lastIsPlaying = state.isPlaying;
+    if (!isProgressScrubbing) {
+      lastProgressMs = state.progressMs;
+      lastUpdateTime = Date.now();
+    }
 
-    const pct = state.durationMs > 0 ? (state.progressMs / state.durationMs) * 100 : 0;
-    progressFill.style.width = `${pct}%`;
-    progressTime.textContent = formatTime(state.progressMs);
+    if (!isProgressScrubbing) {
+      const pct = state.durationMs > 0 ? (state.progressMs / state.durationMs) * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime(state.progressMs);
+    }
     durationTime.textContent = formatTime(state.durationMs);
 
     if (state.isPlaying) {
@@ -179,6 +201,7 @@ export function createNowPlayingUI(
     root,
     update,
     destroy() {
+      cleanupProgressCommit();
       stopTicking();
       art.destroy();
       root.remove();

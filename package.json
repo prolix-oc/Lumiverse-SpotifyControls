@@ -6,11 +6,10 @@
   "scripts": {
     "build:backend": "bun build src/backend.ts --outfile dist/backend.js --target bun",
     "build:frontend": "bun build src/frontend.ts --outfile dist/frontend.js --target browser",
-    "build": "bun run build:backend && bun run build:frontend",
-    "typecheck": "tsc --noEmit"
+    "build": "bun run build:backend && bun run build:frontend"
   },
   "devDependencies": {
-    "lumiverse-spindle-types": "0.5.26",
+    "lumiverse-spindle-types": "0.5.28",
     "typescript": "^5.7.3"
   }
 }

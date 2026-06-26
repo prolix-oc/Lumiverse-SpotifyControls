@@ -1,6 +1,7 @@
 import type { PlaybackState, DeviceInfo, MiniPlayerStyle } from "../types";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
 import { parseSyncedLyrics } from "./synced-lyrics-model";
+import { bindProgressCommitOnRelease, bindRangeCommitOnRelease } from "./release-commit";
 
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
@@ -249,6 +250,8 @@ export function createMiniPlayerUI(
   let pendingPlaybackRefresh: { state: PlaybackState | null; connected: boolean } | null = null;
   let pendingDevices: DeviceInfo[] | null = null;
   let pendingVolume: number | null = null;
+  let isProgressScrubbing = false;
+  let isVolumeInteracting = false;
 
   function setLyricsStatus(message: string, loading = false) {
     lyricsStatus.className = loading
@@ -411,6 +414,10 @@ export function createMiniPlayerUI(
       animFrameId = null;
       return;
     }
+    if (isProgressScrubbing) {
+      animFrameId = requestAnimationFrame(tickProgress);
+      return;
+    }
     const elapsed = Date.now() - lastUpdateTime;
     const interpolated = Math.min(lastProgressMs + elapsed, currentDuration);
     const pct = (interpolated / currentDuration) * 100;
@@ -456,24 +463,39 @@ export function createMiniPlayerUI(
     hide();
   });
 
-  progressBar.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (!currentDuration) return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    sendToBackend({ type: "seek", positionMs: Math.round(pct * currentDuration) });
+  const cleanupProgressCommit = bindProgressCommitOnRelease(progressBar, {
+    getMaxValue: () => currentDuration,
+    onInteractChange(active) {
+      isProgressScrubbing = active;
+    },
+    onPreview(positionMs) {
+      const pct = currentDuration > 0 ? (positionMs / currentDuration) * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime(positionMs);
+    },
+    onCommit(positionMs) {
+      if (currentState) {
+        currentState = { ...currentState, progressMs: positionMs };
+      }
+      lastProgressMs = positionMs;
+      lastUpdateTime = Date.now();
+      updateActiveLyricLine(true);
+      sendToBackend({ type: "seek", positionMs });
+      if (visible && lastIsPlaying) startTicking();
+    },
   });
 
-  let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
   const volumeChangeHandlers = new Set<(percent: number) => void>();
-  volumeSlider.addEventListener("input", (e) => {
-    e.stopPropagation();
-    const percent = parseInt(volumeSlider.value, 10);
-    for (const h of volumeChangeHandlers) h(percent);
-    if (volumeDebounce) clearTimeout(volumeDebounce);
-    volumeDebounce = setTimeout(() => {
+  const cleanupVolumeCommit = bindRangeCommitOnRelease(volumeSlider, {
+    onInteractChange(active) {
+      isVolumeInteracting = active;
+    },
+    onPreview(percent) {
+      for (const handler of volumeChangeHandlers) handler(percent);
+    },
+    onCommit(percent) {
       sendToBackend({ type: "set_volume", percent });
-    }, 200);
+    },
   });
 
   let deviceListOpen = false;
@@ -634,6 +656,8 @@ export function createMiniPlayerUI(
     }
 
     if (!connected || !state) {
+      isProgressScrubbing = false;
+      isVolumeInteracting = false;
       art.setUrl(null);
       header.style.display = "none";
       progressRow.style.display = "none";
@@ -678,16 +702,18 @@ export function createMiniPlayerUI(
 
     isPlaying = state.isPlaying;
     lastIsPlaying = state.isPlaying;
-    lastProgressMs = state.progressMs;
-    lastUpdateTime = Date.now();
     playPauseBtn.innerHTML = isPlaying ? ICON_PAUSE : ICON_PLAY;
 
-    const pct = state.durationMs > 0 ? (state.progressMs / state.durationMs) * 100 : 0;
-    progressFill.style.width = `${pct}%`;
-    progressTime.textContent = formatTime(state.progressMs);
+    if (!isProgressScrubbing) {
+      lastProgressMs = state.progressMs;
+      lastUpdateTime = Date.now();
+      const pct = state.durationMs > 0 ? (state.progressMs / state.durationMs) * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      progressTime.textContent = formatTime(state.progressMs);
+    }
     durationTime.textContent = formatTime(state.durationMs);
 
-    if (state.volume !== null) {
+    if (state.volume !== null && !isVolumeInteracting) {
       volumeSlider.value = String(state.volume);
     }
 
@@ -803,7 +829,8 @@ export function createMiniPlayerUI(
     destroy() {
       hide();
       stopTicking();
-      if (volumeDebounce) clearTimeout(volumeDebounce);
+      cleanupProgressCommit();
+      cleanupVolumeCommit();
       volumeChangeHandlers.clear();
       root.remove();
     },

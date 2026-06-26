@@ -5,6 +5,7 @@ import {
   parseSyncedLyrics,
   shouldReserveScaleGutter,
 } from "./synced-lyrics-model";
+import { bindProgressCommitOnRelease, bindRangeCommitOnRelease } from "./release-commit";
 
 const USER_SCROLL_SUPPRESS_MS = 2500;
 
@@ -35,6 +36,11 @@ function getCompactPlainLyricLines(lyrics: string | null): string[] {
 
 function stopEventPropagation(el: HTMLElement) {
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
+  el.addEventListener("pointermove", (e) => e.stopPropagation());
+  el.addEventListener("pointerup", (e) => e.stopPropagation());
+  el.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+  el.addEventListener("touchmove", (e) => e.stopPropagation(), { passive: true });
+  el.addEventListener("touchend", (e) => e.stopPropagation(), { passive: true });
   el.addEventListener("click", (e) => e.stopPropagation());
 }
 
@@ -315,6 +321,7 @@ export function createModernWidgetPlayerUI(
   root.appendChild(expanded);
 
   [progressBar, prevBtn, playPauseBtn, nextBtn, volumeSlider].forEach((el) => stopEventPropagation(el));
+  stopEventPropagation(lyricsBody);
 
   let connected = false;
   let state: PlaybackState | null = null;
@@ -329,7 +336,6 @@ export function createModernWidgetPlayerUI(
   let plainLyricLines: string[] = [];
   let lyricsInstrumental = false;
   let lyricsLoading = false;
-  let volumeDebounce: ReturnType<typeof setTimeout> | null = null;
   let lastRenderedLyricSignature = "";
   let syncedLyricEls: HTMLDivElement[] = [];
   let autoScrollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -339,6 +345,8 @@ export function createModernWidgetPlayerUI(
   let lastMetadataSignature = "";
   let marqueeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let marqueeRefreshTimerLate: ReturnType<typeof setTimeout> | null = null;
+  let isProgressScrubbing = false;
+  let isVolumeInteracting = false;
 
   const marqueeObserver = new ResizeObserver(() => {
     refreshMarquees(false);
@@ -561,6 +569,10 @@ export function createModernWidgetPlayerUI(
       animFrameId = null;
       return;
     }
+    if (isProgressScrubbing) {
+      animFrameId = requestAnimationFrame(tickProgress);
+      return;
+    }
 
     const interpolated = getInterpolatedProgressMs();
     const pct = currentDuration > 0 ? (interpolated / currentDuration) * 100 : 0;
@@ -587,17 +599,38 @@ export function createModernWidgetPlayerUI(
   nextBtn.addEventListener("click", () => sendToBackend({ type: "next" }));
   playPauseBtn.addEventListener("click", () => sendToBackend({ type: state?.isPlaying ? "pause" : "play" }));
 
-  progressBar.addEventListener("click", (e) => {
-    if (!currentDuration) return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    sendToBackend({ type: "seek", positionMs: Math.round(pct * currentDuration) });
+  const cleanupProgressCommit = bindProgressCommitOnRelease(progressBar, {
+    getMaxValue: () => currentDuration,
+    onInteractChange(active) {
+      isProgressScrubbing = active;
+    },
+    onPreview(positionMs) {
+      const pct = currentDuration > 0 ? (positionMs / currentDuration) * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      setCompactProgress(pct, currentDuration > 0);
+      progressTime.textContent = formatTime(positionMs);
+    },
+    onCommit(positionMs) {
+      if (state) {
+        state = { ...state, progressMs: positionMs };
+      }
+      lastProgressMs = positionMs;
+      lastUpdateTime = Date.now();
+      updateActiveLyricLine(true);
+      sendToBackend({ type: "seek", positionMs });
+      if (lastIsPlaying) startTicking();
+    },
+    stopPropagation: true,
   });
 
-  volumeSlider.addEventListener("input", () => {
-    const percent = parseInt(volumeSlider.value, 10);
-    if (volumeDebounce) clearTimeout(volumeDebounce);
-    volumeDebounce = setTimeout(() => sendToBackend({ type: "set_volume", percent }), 160);
+  const cleanupVolumeCommit = bindRangeCommitOnRelease(volumeSlider, {
+    onInteractChange(active) {
+      isVolumeInteracting = active;
+    },
+    onCommit(percent) {
+      sendToBackend({ type: "set_volume", percent });
+    },
+    stopPropagation: true,
   });
 
   function update(playbackState: PlaybackState | null, isConnected: boolean) {
@@ -606,6 +639,8 @@ export function createModernWidgetPlayerUI(
     root.dataset.empty = !playbackState ? "true" : "false";
 
     if (!isConnected || !playbackState) {
+      isProgressScrubbing = false;
+      isVolumeInteracting = false;
       eyebrow.textContent = isConnected ? "Standby" : "Connect Spotify";
       compactStatus.textContent = isConnected ? "No playback" : "Connect Spotify";
       emptyState.style.display = "grid";
@@ -644,23 +679,27 @@ export function createModernWidgetPlayerUI(
     emptyState.style.display = "none";
 
     currentDuration = playbackState.durationMs;
-    lastProgressMs = playbackState.progressMs;
-    lastUpdateTime = Date.now();
     lastIsPlaying = playbackState.isPlaying;
     syncedLyricsModel.setPlayback({
       trackUri: playbackState.trackUri,
-      progressMs: playbackState.progressMs,
+      progressMs: isProgressScrubbing ? lastProgressMs : playbackState.progressMs,
       durationMs: playbackState.durationMs,
       isPlaying: playbackState.isPlaying,
-      updatedAt: lastUpdateTime,
+      updatedAt: isProgressScrubbing ? lastUpdateTime : Date.now(),
     });
     playPauseBtn.innerHTML = playbackState.isPlaying ? ICON_PAUSE : ICON_PLAY;
-    volumeSlider.value = String(playbackState.volume ?? Number(volumeSlider.value));
+    if (!isVolumeInteracting) {
+      volumeSlider.value = String(playbackState.volume ?? Number(volumeSlider.value));
+    }
 
-    const pct = playbackState.durationMs > 0 ? (playbackState.progressMs / playbackState.durationMs) * 100 : 0;
-    progressFill.style.width = `${pct}%`;
-    setCompactProgress(pct, playbackState.durationMs > 0);
-    progressTime.textContent = formatTime(playbackState.progressMs);
+    if (!isProgressScrubbing) {
+      lastProgressMs = playbackState.progressMs;
+      lastUpdateTime = Date.now();
+      const pct = playbackState.durationMs > 0 ? (playbackState.progressMs / playbackState.durationMs) * 100 : 0;
+      progressFill.style.width = `${pct}%`;
+      setCompactProgress(pct, playbackState.durationMs > 0);
+      progressTime.textContent = formatTime(playbackState.progressMs);
+    }
     durationTime.textContent = formatTime(playbackState.durationMs);
 
     if (syncedLyricsModel.hasLyrics() && playbackState.trackUri === lyricsTrackUri) {
@@ -724,7 +763,8 @@ export function createModernWidgetPlayerUI(
     destroy() {
       stopTicking();
       stopAutoScrollTracking();
-      if (volumeDebounce) clearTimeout(volumeDebounce);
+      cleanupProgressCommit();
+      cleanupVolumeCommit();
       if (marqueeRefreshTimer) clearTimeout(marqueeRefreshTimer);
       if (marqueeRefreshTimerLate) clearTimeout(marqueeRefreshTimerLate);
       marqueeObserver.disconnect();
