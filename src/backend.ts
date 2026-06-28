@@ -1272,9 +1272,10 @@ async function maybeAttachSpotifyPreviewAudio(
     });
     if (previewVerification?.previewUrl) {
       previewUrl = previewVerification.previewUrl;
+      const sourceLabel = previewVerification.source === "embed" ? "Spotify embed" : `/tracks/${previewVerification.trackId}`;
       spindle.log.info(
         `[spotify_prompt_audio] Resolved preview URL for model ${model}: ` +
-        `${formatPromptAudioTrackLabel(state)} via /tracks/${previewVerification.trackId}` +
+        `${formatPromptAudioTrackLabel(state)} via ${sourceLabel}` +
         `${context.chatId ? ` (chat ${context.chatId})` : ""}`
       );
     }
@@ -1283,13 +1284,13 @@ async function maybeAttachSpotifyPreviewAudio(
     if (previewVerification?.verified && previewVerification.trackId) {
       spindle.log.info(
         `[spotify_prompt_audio] Verified no Spotify preview URL for model ${model}: ` +
-        `${formatPromptAudioTrackLabel(state)} returned null on both /me/player and /tracks/${previewVerification.trackId}` +
+        `${formatPromptAudioTrackLabel(state)} returned null on /me/player, /tracks/${previewVerification.trackId}, and embed` +
         `${context.chatId ? ` (chat ${context.chatId})` : ""}`
       );
     } else if (previewVerification?.trackId) {
       spindle.log.info(
         `[spotify_prompt_audio] Skipped attachment for model ${model}: ` +
-        `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and /tracks/${previewVerification.trackId} could not be verified ` +
+        `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and /tracks/${previewVerification.trackId} + embed could not be verified ` +
         `(status ${previewVerification.status ?? "unknown"})` +
         `${context.chatId ? ` (chat ${context.chatId})` : ""}`
       );

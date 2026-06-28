@@ -143,6 +143,38 @@ function parseTrackIdFromUri(trackUri) {
   const match = /^spotify:track:([A-Za-z0-9]+)$/.exec(trackUri.trim());
   return match?.[1] ?? null;
 }
+var SPOTIFY_EMBED_BASE = "https://open.spotify.com/embed/track";
+function extractNextDataJson(html) {
+  const match = /<script\s+id=["']__NEXT_DATA__["']\s+type=["']application\/json["']\s*>([\s\S]*?)<\/script>/i.exec(html);
+  if (!match?.[1])
+    return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+async function fetchEmbedPreviewUrl(trackId) {
+  const url = `${SPOTIFY_EMBED_BASE}/${encodeURIComponent(trackId)}`;
+  let res;
+  try {
+    res = await spindle.cors(url, { method: "GET" });
+  } catch (err) {
+    spindle.log.warn(`Spotify embed fetch failed for ${trackId}: ${err?.message || err}`);
+    return null;
+  }
+  if (res.status !== 200 || !res.body) {
+    spindle.log.warn(`Spotify embed returned status ${res.status} for ${trackId}`);
+    return null;
+  }
+  const nextData = extractNextDataJson(res.body);
+  const previewUrl = nextData?.props?.pageProps?.state?.data?.entity?.audioPreview?.url;
+  if (typeof previewUrl !== "string" || !previewUrl) {
+    spindle.log.info(`Spotify embed had no audioPreview for ${trackId}`);
+    return null;
+  }
+  return previewUrl;
+}
 async function verifyTrackPreviewUrl(trackUri, userId) {
   const trackId = parseTrackIdFromUri(trackUri);
   if (!trackId) {
@@ -154,18 +186,33 @@ async function verifyTrackPreviewUrl(trackUri, userId) {
     };
   }
   const res = await spotifyFetch(`/tracks/${encodeURIComponent(trackId)}`, {}, userId);
-  if (res.status !== 200 || !res.body || res.body.trim() === "") {
+  const apiSuccess = res.status === 200 && !!res.body && res.body.trim() !== "";
+  if (apiSuccess) {
+    const apiPreviewUrl = parsePreviewUrl(JSON.parse(res.body));
+    if (apiPreviewUrl) {
+      return {
+        trackId,
+        previewUrl: apiPreviewUrl,
+        verified: true,
+        status: res.status,
+        source: "api"
+      };
+    }
+  }
+  const embedPreviewUrl = await fetchEmbedPreviewUrl(trackId);
+  if (embedPreviewUrl) {
     return {
       trackId,
-      previewUrl: null,
-      verified: false,
-      status: res.status
+      previewUrl: embedPreviewUrl,
+      verified: true,
+      status: res.status,
+      source: "embed"
     };
   }
   return {
     trackId,
-    previewUrl: parsePreviewUrl(JSON.parse(res.body)),
-    verified: true,
+    previewUrl: null,
+    verified: apiSuccess,
     status: res.status
   };
 }
@@ -1506,14 +1553,15 @@ async function maybeAttachSpotifyPreviewAudio(messages, rawContext) {
     });
     if (previewVerification?.previewUrl) {
       previewUrl = previewVerification.previewUrl;
-      spindle.log.info(`[spotify_prompt_audio] Resolved preview URL for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} via /tracks/${previewVerification.trackId}` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+      const sourceLabel = previewVerification.source === "embed" ? "Spotify embed" : `/tracks/${previewVerification.trackId}`;
+      spindle.log.info(`[spotify_prompt_audio] Resolved preview URL for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} via ${sourceLabel}` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     }
   }
   if (!previewUrl) {
     if (previewVerification?.verified && previewVerification.trackId) {
-      spindle.log.info(`[spotify_prompt_audio] Verified no Spotify preview URL for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} returned null on both /me/player and /tracks/${previewVerification.trackId}` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+      spindle.log.info(`[spotify_prompt_audio] Verified no Spotify preview URL for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} returned null on /me/player, /tracks/${previewVerification.trackId}, and embed` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     } else if (previewVerification?.trackId) {
-      spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and /tracks/${previewVerification.trackId} could not be verified ` + `(status ${previewVerification.status ?? "unknown"})` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+      spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and /tracks/${previewVerification.trackId} + embed could not be verified ` + `(status ${previewVerification.status ?? "unknown"})` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     } else if (state.trackUri) {
       spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and ${state.trackUri} is not a Spotify track URI` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     } else {

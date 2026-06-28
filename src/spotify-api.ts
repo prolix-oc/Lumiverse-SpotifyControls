@@ -202,6 +202,7 @@ export type TrackPreviewVerification = {
   previewUrl: string | null;
   verified: boolean;
   status: number | null;
+  source?: "api" | "embed" | null;
 };
 
 function parsePreviewUrl(track: any): string | null {
@@ -217,6 +218,48 @@ function parseTrackIdFromUri(trackUri: string): string | null {
   return match?.[1] ?? null;
 }
 
+const SPOTIFY_EMBED_BASE = "https://open.spotify.com/embed/track";
+
+function extractNextDataJson(html: string): unknown | null {
+  const match = /<script\s+id=["']__NEXT_DATA__["']\s+type=["']application\/json["']\s*>([\s\S]*?)<\/script>/i.exec(html);
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scrape the public Spotify embed page for a track's 30-second preview URL.
+ * This is an unauthenticated fallback for when the Web API returns a null
+ * preview_url (which has become increasingly common).
+ */
+export async function fetchEmbedPreviewUrl(trackId: string): Promise<string | null> {
+  const url = `${SPOTIFY_EMBED_BASE}/${encodeURIComponent(trackId)}`;
+  let res: { status: number; body: string };
+  try {
+    res = (await spindle.cors(url, { method: "GET" })) as { status: number; body: string };
+  } catch (err: any) {
+    spindle.log.warn(`Spotify embed fetch failed for ${trackId}: ${err?.message || err}`);
+    return null;
+  }
+
+  if (res.status !== 200 || !res.body) {
+    spindle.log.warn(`Spotify embed returned status ${res.status} for ${trackId}`);
+    return null;
+  }
+
+  const nextData = extractNextDataJson(res.body);
+  const previewUrl = (nextData as any)?.props?.pageProps?.state?.data?.entity?.audioPreview?.url;
+  if (typeof previewUrl !== "string" || !previewUrl) {
+    spindle.log.info(`Spotify embed had no audioPreview for ${trackId}`);
+    return null;
+  }
+
+  return previewUrl;
+}
+
 export async function verifyTrackPreviewUrl(trackUri: string, userId?: string): Promise<TrackPreviewVerification> {
   const trackId = parseTrackIdFromUri(trackUri);
   if (!trackId) {
@@ -229,19 +272,37 @@ export async function verifyTrackPreviewUrl(trackUri: string, userId?: string): 
   }
 
   const res = await spotifyFetch(`/tracks/${encodeURIComponent(trackId)}`, {}, userId);
-  if (res.status !== 200 || !res.body || res.body.trim() === "") {
+  const apiSuccess = res.status === 200 && !!res.body && res.body.trim() !== "";
+
+  if (apiSuccess) {
+    const apiPreviewUrl = parsePreviewUrl(JSON.parse(res.body));
+    if (apiPreviewUrl) {
+      return {
+        trackId,
+        previewUrl: apiPreviewUrl,
+        verified: true,
+        status: res.status,
+        source: "api",
+      };
+    }
+  }
+
+  // Fallback: scrape the public embed page (unauthenticated, more reliable lately)
+  const embedPreviewUrl = await fetchEmbedPreviewUrl(trackId);
+  if (embedPreviewUrl) {
     return {
       trackId,
-      previewUrl: null,
-      verified: false,
+      previewUrl: embedPreviewUrl,
+      verified: true,
       status: res.status,
+      source: "embed",
     };
   }
 
   return {
     trackId,
-    previewUrl: parsePreviewUrl(JSON.parse(res.body)),
-    verified: true,
+    previewUrl: null,
+    verified: apiSuccess,
     status: res.status,
   };
 }
