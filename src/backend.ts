@@ -1,6 +1,6 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
-import type { LlmMessageDTO, LlmMessagePartDTO } from "lumiverse-spindle-types";
+import type { InterceptorResultDTO, LlmMessageDTO, LlmMessagePartDTO } from "lumiverse-spindle-types";
 import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle, PlaybackState, SongSnapshot, MessageSongEntry } from "./types";
 import * as spotify from "./spotify-api";
 import {
@@ -940,6 +940,11 @@ type PreviewAudioPayload = {
   fetchedAt: number;
 };
 
+type PromptAudioAttachmentResult = {
+  messages: LlmMessageDTO[];
+  targetIndex: number;
+};
+
 const AUDIO_ENABLED_MODELS = new Set([
   "gemini-3-pro-preview",
   "gemini-3.1-pro-preview",
@@ -952,6 +957,8 @@ const AUDIO_ENABLED_MODELS = new Set([
 const PREVIEW_AUDIO_CACHE_TTL_MS = 30 * 60_000;
 const PREVIEW_AUDIO_CACHE_MAX = 12;
 const PREVIEW_AUDIO_MAX_BASE64_CHARS = 2_000_000;
+const PROMPT_AUDIO_BREAKDOWN_NAME = "Spotify preview audio attached";
+const PROMPT_AUDIO_BREAKDOWN_CONTENT = "[Spotify Controls] The latest user turn includes an attached Spotify audio preview from Spotify.";
 
 const previewAudioCache = new Map<string, PreviewAudioPayload>();
 let promptAudioInterceptorRegistered = false;
@@ -1096,28 +1103,64 @@ function canAttachAudioToLastUserMessage(message: LlmMessageDTO): boolean {
 function attachPreviewAudioToLastUserMessage(
   messages: LlmMessageDTO[],
   previewAudio: PreviewAudioPayload,
-): LlmMessageDTO[] {
+): PromptAudioAttachmentResult | null {
   const targetIndex = findLastUserMessageIndex(messages);
-  if (targetIndex < 0) return messages;
+  if (targetIndex < 0) return null;
 
   const target = messages[targetIndex];
-  if (!canAttachAudioToLastUserMessage(target)) return messages;
+  if (!canAttachAudioToLastUserMessage(target)) return null;
   const nextContent = appendAudioPart(target.content, {
     type: "audio",
     data: previewAudio.data,
     mime_type: previewAudio.mimeType,
   });
-  if (!nextContent) return messages;
+  if (!nextContent) return null;
 
   const nextMessages = messages.slice();
   nextMessages[targetIndex] = { ...target, content: nextContent };
-  return nextMessages;
+  return { messages: nextMessages, targetIndex };
+}
+
+function insertPromptAudioBreakdownNote(
+  messages: LlmMessageDTO[],
+  targetIndex: number,
+): { messages: LlmMessageDTO[]; breakdownIndex: number } {
+  const nextMessages = messages.slice();
+  nextMessages.splice(targetIndex, 0, {
+    role: "system",
+    content: PROMPT_AUDIO_BREAKDOWN_CONTENT,
+  });
+  return { messages: nextMessages, breakdownIndex: targetIndex };
+}
+
+function formatPromptAudioTrackLabel(state: PlaybackState): string {
+  return state.artistName
+    ? `"${state.trackName}" by ${state.artistName}`
+    : `"${state.trackName}"`;
+}
+
+function logAndToastPromptAudioAttachment(
+  userId: string,
+  state: PlaybackState,
+  model: string,
+  chatId?: string,
+): void {
+  const trackLabel = formatPromptAudioTrackLabel(state);
+  spindle.log.info(
+    `[spotify_prompt_audio] Attached preview audio for ${trackLabel} ` +
+    `(model ${model}${chatId ? `, chat ${chatId}` : ""})`
+  );
+  spindle.toast.info(`Attached Spotify preview for ${trackLabel}.`, {
+    title: "Spotify Audio Attached",
+    duration: 2600,
+    userId,
+  });
 }
 
 async function maybeAttachSpotifyPreviewAudio(
   messages: LlmMessageDTO[],
   rawContext: unknown,
-): Promise<LlmMessageDTO[]> {
+): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
   const sanitizedMessages = stripAudioFromNonLastUserMessages(messages);
   const context = rawContext && typeof rawContext === "object"
     ? rawContext as SpotifyAudioInterceptorContext
@@ -1147,7 +1190,20 @@ async function maybeAttachSpotifyPreviewAudio(
   const previewAudio = await getPreviewAudioPayload(previewUrl);
   if (!previewAudio) return sanitizedMessages;
 
-  return attachPreviewAudioToLastUserMessage(sanitizedMessages, previewAudio);
+  const attached = attachPreviewAudioToLastUserMessage(sanitizedMessages, previewAudio);
+  if (!attached || !state) return sanitizedMessages;
+
+  logAndToastPromptAudioAttachment(spotifyUserId, state, model, context.chatId);
+  const withNote = insertPromptAudioBreakdownNote(attached.messages, attached.targetIndex);
+  return {
+    messages: withNote.messages,
+    breakdown: [
+      {
+        messageIndex: withNote.breakdownIndex,
+        name: PROMPT_AUDIO_BREAKDOWN_NAME,
+      },
+    ],
+  };
 }
 
 function readSpindleMeta(message: MsgLike): Record<string, unknown> {
