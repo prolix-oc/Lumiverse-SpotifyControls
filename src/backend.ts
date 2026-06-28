@@ -34,12 +34,22 @@ type UserSession = {
 
 const sessions = new Map<string, UserSession>();
 const pendingOAuthByState = new Map<string, PendingOAuth>();
+const chatOwnerById = new Map<string, string>();
 const LYRICS_CACHE_ENTRIES = 24;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 function send(msg: BackendToFrontend, userId: string) {
   spindle.sendToFrontend(msg, userId);
+}
+
+function rememberChatOwner(chatId: string | null | undefined, userId: string | null | undefined): void {
+  if (!chatId || !userId) return;
+  chatOwnerById.set(chatId, userId);
+  if (chatOwnerById.size > 256) {
+    const oldest = chatOwnerById.keys().next().value;
+    if (oldest) chatOwnerById.delete(oldest);
+  }
 }
 
 function getSession(userId: string): UserSession {
@@ -545,6 +555,16 @@ function parseCallbackUrl(value: string): Record<string, string> {
   return result;
 }
 
+spindle.on("CHAT_SWITCHED", (payload, userId) => {
+  const detail = payload as { chatId?: string | null } | undefined;
+  rememberChatOwner(detail?.chatId ?? null, userId);
+});
+
+spindle.on("MESSAGE_SENT", (payload, userId) => {
+  const detail = payload as { chatId?: string } | undefined;
+  rememberChatOwner(detail?.chatId, userId);
+});
+
 spindle.oauth.onCallback(async (params) => {
   return completeOAuthCallback(params);
 });
@@ -785,6 +805,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
 
       case "get_chat_songs": {
+        rememberChatOwner(msg.chatId, userId);
         await sendChatSongs(msg.chatId, userId);
         break;
       }
@@ -924,6 +945,7 @@ type SpotifyAudioInterceptorContext = {
   chatId?: string;
   connectionId?: string;
   generationType?: string;
+  userId?: string;
 };
 
 type CorsBinaryResponse = {
@@ -968,10 +990,37 @@ function normalizeModelId(model: string): string {
 }
 
 function isAudioEnabledModel(model: string | null | undefined): boolean {
-  return !!model && AUDIO_ENABLED_MODELS.has(normalizeModelId(model));
+  if (!model) return false;
+  const normalized = normalizeModelId(model);
+  if (AUDIO_ENABLED_MODELS.has(normalized)) return true;
+  for (const candidate of AUDIO_ENABLED_MODELS) {
+    if (
+      normalized.endsWith(`/${candidate}`) ||
+      normalized.endsWith(`:${candidate}`) ||
+      normalized.includes(`/${candidate}:`) ||
+      normalized.includes(`:${candidate}/`)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
-function resolveConnectedSpotifyUserId(): string | null {
+function resolvePromptUserId(context: SpotifyAudioInterceptorContext): string | null {
+  if (typeof context.userId === "string" && context.userId) return context.userId;
+  if (typeof context.chatId === "string") {
+    const mapped = chatOwnerById.get(context.chatId);
+    if (mapped) return mapped;
+  }
+  if (activeUserId) return activeUserId;
+  for (const userId of sessions.keys()) {
+    return userId;
+  }
+  return null;
+}
+
+function resolveConnectedSpotifyUserId(preferredUserId?: string | null): string | null {
+  if (preferredUserId && spotify.isConnected(preferredUserId)) return preferredUserId;
   if (activeUserId && spotify.isConnected(activeUserId)) return activeUserId;
   for (const userId of sessions.keys()) {
     if (spotify.isConnected(userId)) return userId;
@@ -979,12 +1028,12 @@ function resolveConnectedSpotifyUserId(): string | null {
   return null;
 }
 
-async function resolveInterceptorModel(context: SpotifyAudioInterceptorContext): Promise<string | null> {
+async function resolveInterceptorModel(context: SpotifyAudioInterceptorContext, userId?: string | null): Promise<string | null> {
   const connectionId = typeof context.connectionId === "string" ? context.connectionId : null;
   if (connectionId) {
-    return (await spindle.connections.get(connectionId))?.model?.trim() || null;
+    return (await spindle.connections.get(connectionId, userId || undefined))?.model?.trim() || null;
   }
-  const defaultConnection = (await spindle.connections.list()).find((connection) => connection.is_default);
+  const defaultConnection = (await spindle.connections.list(userId || undefined)).find((connection) => connection.is_default);
   return defaultConnection?.model?.trim() || null;
 }
 
@@ -1168,30 +1217,76 @@ async function maybeAttachSpotifyPreviewAudio(
 
   if (context.generationType === "quiet") return sanitizedMessages;
 
-  const config = await loadConfig().catch(() => null);
+  const promptUserId = resolvePromptUserId(context);
+  if (!promptUserId) {
+    spindle.log.warn(
+      `[spotify_prompt_audio] Skipped attachment: could not resolve user scope` +
+      `${context.chatId ? ` for chat ${context.chatId}` : ""}`
+    );
+    return sanitizedMessages;
+  }
+
+  const config = await loadConfig(promptUserId).catch((err: any) => {
+    spindle.log.warn(
+      `[spotify_prompt_audio] Config lookup failed for user ${promptUserId}: ${err?.message || err}`
+    );
+    return null;
+  });
   if (!config?.promptAudioPreviewEnabled) return sanitizedMessages;
 
   let model: string | null;
   try {
-    model = await resolveInterceptorModel(context);
+    model = await resolveInterceptorModel(context, promptUserId);
   } catch (err: any) {
     spindle.log.warn(`Spotify prompt audio model lookup failed: ${err?.message || err}`);
     return sanitizedMessages;
   }
   if (!isAudioEnabledModel(model)) return sanitizedMessages;
 
-  const spotifyUserId = resolveConnectedSpotifyUserId();
-  if (!spotifyUserId) return sanitizedMessages;
+  const spotifyUserId = resolveConnectedSpotifyUserId(promptUserId);
+  if (!spotifyUserId) {
+    spindle.log.info(
+      `[spotify_prompt_audio] Skipped attachment for model ${model}: no connected Spotify session` +
+      `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+    );
+    return sanitizedMessages;
+  }
 
   const state = await getSnapshotState(spotifyUserId).catch(() => null);
+  if (!state) {
+    spindle.log.info(
+      `[spotify_prompt_audio] Skipped attachment for model ${model}: no active playback state` +
+      `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+    );
+    return sanitizedMessages;
+  }
   const previewUrl = state?.previewUrl;
-  if (!previewUrl) return sanitizedMessages;
+  if (!previewUrl) {
+    spindle.log.info(
+      `[spotify_prompt_audio] Skipped attachment for model ${model}: ` +
+      `${formatPromptAudioTrackLabel(state)} has no Spotify preview URL` +
+      `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+    );
+    return sanitizedMessages;
+  }
 
   const previewAudio = await getPreviewAudioPayload(previewUrl);
-  if (!previewAudio) return sanitizedMessages;
+  if (!previewAudio) {
+    spindle.log.info(
+      `[spotify_prompt_audio] Skipped attachment for model ${model}: preview fetch returned no audio` +
+      `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+    );
+    return sanitizedMessages;
+  }
 
   const attached = attachPreviewAudioToLastUserMessage(sanitizedMessages, previewAudio);
-  if (!attached || !state) return sanitizedMessages;
+  if (!attached) {
+    spindle.log.info(
+      `[spotify_prompt_audio] Skipped attachment for model ${model}: last user turn was not attachable` +
+      `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+    );
+    return sanitizedMessages;
+  }
 
   logAndToastPromptAudioAttachment(spotifyUserId, state, model, context.chatId);
   const withNote = insertPromptAudioBreakdownNote(attached.messages, attached.targetIndex);
@@ -1308,10 +1403,11 @@ const PENDING_GEN_MAX = 64;
 let generationUnsubs: Array<() => void> = [];
 
 async function onGenerationStarted(payload: unknown, userId?: string): Promise<void> {
-  const p = payload as { generationId?: string } | undefined;
+  const p = payload as { generationId?: string; chatId?: string } | undefined;
   const genId = p?.generationId;
   const uid = userId || activeUserId;
   if (!genId || !uid) return;
+  rememberChatOwner(p?.chatId, uid);
   const snapshot = buildSongSnapshot(await getSnapshotState(uid));
   if (!snapshot) return; // nothing playing when generation began — no badge
   if (pendingGenerationSongs.size >= PENDING_GEN_MAX) {

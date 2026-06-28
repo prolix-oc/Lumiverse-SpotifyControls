@@ -475,9 +475,20 @@ function createLyricsRequestCoordinator(load, maxEntries = 24) {
 var activeUserId2 = null;
 var sessions = new Map;
 var pendingOAuthByState = new Map;
+var chatOwnerById = new Map;
 var LYRICS_CACHE_ENTRIES = 24;
 function send(msg, userId) {
   spindle.sendToFrontend(msg, userId);
+}
+function rememberChatOwner(chatId, userId) {
+  if (!chatId || !userId)
+    return;
+  chatOwnerById.set(chatId, userId);
+  if (chatOwnerById.size > 256) {
+    const oldest = chatOwnerById.keys().next().value;
+    if (oldest)
+      chatOwnerById.delete(oldest);
+  }
 }
 function getSession(userId) {
   let session = sessions.get(userId);
@@ -888,6 +899,14 @@ function parseCallbackUrl(value) {
   }
   return result;
 }
+spindle.on("CHAT_SWITCHED", (payload, userId) => {
+  const detail = payload;
+  rememberChatOwner(detail?.chatId ?? null, userId);
+});
+spindle.on("MESSAGE_SENT", (payload, userId) => {
+  const detail = payload;
+  rememberChatOwner(detail?.chatId, userId);
+});
 spindle.oauth.onCallback(async (params) => {
   return completeOAuthCallback(params);
 });
@@ -1094,6 +1113,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       }
       case "get_chat_songs": {
+        rememberChatOwner(msg.chatId, userId);
         await sendChatSongs(msg.chatId, userId);
         break;
       }
@@ -1213,9 +1233,36 @@ function normalizeModelId(model) {
   return model.trim().toLowerCase();
 }
 function isAudioEnabledModel(model) {
-  return !!model && AUDIO_ENABLED_MODELS.has(normalizeModelId(model));
+  if (!model)
+    return false;
+  const normalized = normalizeModelId(model);
+  if (AUDIO_ENABLED_MODELS.has(normalized))
+    return true;
+  for (const candidate of AUDIO_ENABLED_MODELS) {
+    if (normalized.endsWith(`/${candidate}`) || normalized.endsWith(`:${candidate}`) || normalized.includes(`/${candidate}:`) || normalized.includes(`:${candidate}/`)) {
+      return true;
+    }
+  }
+  return false;
 }
-function resolveConnectedSpotifyUserId() {
+function resolvePromptUserId(context) {
+  if (typeof context.userId === "string" && context.userId)
+    return context.userId;
+  if (typeof context.chatId === "string") {
+    const mapped = chatOwnerById.get(context.chatId);
+    if (mapped)
+      return mapped;
+  }
+  if (activeUserId2)
+    return activeUserId2;
+  for (const userId of sessions.keys()) {
+    return userId;
+  }
+  return null;
+}
+function resolveConnectedSpotifyUserId(preferredUserId) {
+  if (preferredUserId && isConnected(preferredUserId))
+    return preferredUserId;
   if (activeUserId2 && isConnected(activeUserId2))
     return activeUserId2;
   for (const userId of sessions.keys()) {
@@ -1224,12 +1271,12 @@ function resolveConnectedSpotifyUserId() {
   }
   return null;
 }
-async function resolveInterceptorModel(context) {
+async function resolveInterceptorModel(context, userId) {
   const connectionId = typeof context.connectionId === "string" ? context.connectionId : null;
   if (connectionId) {
-    return (await spindle.connections.get(connectionId))?.model?.trim() || null;
+    return (await spindle.connections.get(connectionId, userId || undefined))?.model?.trim() || null;
   }
-  const defaultConnection = (await spindle.connections.list()).find((connection) => connection.is_default);
+  const defaultConnection = (await spindle.connections.list(userId || undefined)).find((connection) => connection.is_default);
   return defaultConnection?.model?.trim() || null;
 }
 function touchPreviewAudioCache(previewUrl, payload) {
@@ -1387,31 +1434,51 @@ async function maybeAttachSpotifyPreviewAudio(messages, rawContext) {
   const context = rawContext && typeof rawContext === "object" ? rawContext : {};
   if (context.generationType === "quiet")
     return sanitizedMessages;
-  const config = await loadConfig().catch(() => null);
+  const promptUserId = resolvePromptUserId(context);
+  if (!promptUserId) {
+    spindle.log.warn(`[spotify_prompt_audio] Skipped attachment: could not resolve user scope` + `${context.chatId ? ` for chat ${context.chatId}` : ""}`);
+    return sanitizedMessages;
+  }
+  const config = await loadConfig(promptUserId).catch((err) => {
+    spindle.log.warn(`[spotify_prompt_audio] Config lookup failed for user ${promptUserId}: ${err?.message || err}`);
+    return null;
+  });
   if (!config?.promptAudioPreviewEnabled)
     return sanitizedMessages;
   let model;
   try {
-    model = await resolveInterceptorModel(context);
+    model = await resolveInterceptorModel(context, promptUserId);
   } catch (err) {
     spindle.log.warn(`Spotify prompt audio model lookup failed: ${err?.message || err}`);
     return sanitizedMessages;
   }
   if (!isAudioEnabledModel(model))
     return sanitizedMessages;
-  const spotifyUserId = resolveConnectedSpotifyUserId();
-  if (!spotifyUserId)
+  const spotifyUserId = resolveConnectedSpotifyUserId(promptUserId);
+  if (!spotifyUserId) {
+    spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: no connected Spotify session` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     return sanitizedMessages;
+  }
   const state = await getSnapshotState(spotifyUserId).catch(() => null);
+  if (!state) {
+    spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: no active playback state` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+    return sanitizedMessages;
+  }
   const previewUrl = state?.previewUrl;
-  if (!previewUrl)
+  if (!previewUrl) {
+    spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no Spotify preview URL` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     return sanitizedMessages;
+  }
   const previewAudio = await getPreviewAudioPayload(previewUrl);
-  if (!previewAudio)
+  if (!previewAudio) {
+    spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: preview fetch returned no audio` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     return sanitizedMessages;
+  }
   const attached = attachPreviewAudioToLastUserMessage(sanitizedMessages, previewAudio);
-  if (!attached || !state)
+  if (!attached) {
+    spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: last user turn was not attachable` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     return sanitizedMessages;
+  }
   logAndToastPromptAudioAttachment(spotifyUserId, state, model, context.chatId);
   const withNote = insertPromptAudioBreakdownNote(attached.messages, attached.targetIndex);
   return {
@@ -1505,6 +1572,7 @@ async function onGenerationStarted(payload, userId) {
   const uid = userId || activeUserId2;
   if (!genId || !uid)
     return;
+  rememberChatOwner(p?.chatId, uid);
   const snapshot = buildSongSnapshot(await getSnapshotState(uid));
   if (!snapshot)
     return;
