@@ -976,8 +976,7 @@ const AUDIO_ENABLED_MODELS = new Set([
   "gemini-3.1-pro-preview",
   "gemini-3-flash",
   "gemini-3.5-flash",
-  "kimi-k2.5",
-  "kimi-k2.6",
+  "mimo-v2.5",
 ].map((model) => model.toLowerCase()));
 
 const PREVIEW_AUDIO_CACHE_TTL_MS = 30 * 60_000;
@@ -988,6 +987,7 @@ const PROMPT_AUDIO_BREAKDOWN_CONTENT = "[Spotify Controls] The latest user turn 
 
 const previewAudioCache = new Map<string, PreviewAudioPayload>();
 let promptAudioInterceptorRegistered = false;
+let promptAudioAttachedThisTurn = false;
 
 function normalizeModelId(model: string): string {
   return model.trim().toLowerCase();
@@ -997,6 +997,10 @@ function isAudioEnabledModel(model: string | null | undefined): boolean {
   if (!model) return false;
   const normalized = normalizeModelId(model);
   if (AUDIO_ENABLED_MODELS.has(normalized)) return true;
+  // Catch-all for the Gemini 3 model family, most of which support audio input.
+  if (normalized.split(/[/:]/).some((segment) => segment.startsWith("gemini-3"))) {
+    return true;
+  }
   for (const candidate of AUDIO_ENABLED_MODELS) {
     if (
       normalized.endsWith(`/${candidate}`) ||
@@ -1214,6 +1218,7 @@ async function maybeAttachSpotifyPreviewAudio(
   messages: LlmMessageDTO[],
   rawContext: unknown,
 ): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
+  promptAudioAttachedThisTurn = false;
   const sanitizedMessages = stripAudioFromNonLastUserMessages(messages);
   const context = rawContext && typeof rawContext === "object"
     ? rawContext as SpotifyAudioInterceptorContext
@@ -1333,6 +1338,7 @@ async function maybeAttachSpotifyPreviewAudio(
   }
 
   logAndToastPromptAudioAttachment(spotifyUserId, state, model, context.chatId);
+  promptAudioAttachedThisTurn = true;
   const withNote = insertPromptAudioBreakdownNote(attached.messages, attached.targetIndex);
   return {
     messages: withNote.messages,
@@ -1697,6 +1703,17 @@ spindle.registerMacro({
     } catch {
       return false;
     }
+  }) as any,
+});
+
+spindle.registerMacro({
+  name: "spotify_audio_attached",
+  category: "extension:spotify_controls",
+  description: "Returns whether a Spotify preview audio file was attached to the current user message",
+  returnType: "boolean",
+  volatile: true,
+  handler: (async () => {
+    return promptAudioAttachedThisTurn;
   }) as any,
 });
 

@@ -1299,8 +1299,7 @@ var AUDIO_ENABLED_MODELS = new Set([
   "gemini-3.1-pro-preview",
   "gemini-3-flash",
   "gemini-3.5-flash",
-  "kimi-k2.5",
-  "kimi-k2.6"
+  "mimo-v2.5"
 ].map((model) => model.toLowerCase()));
 var PREVIEW_AUDIO_CACHE_TTL_MS = 30 * 60000;
 var PREVIEW_AUDIO_CACHE_MAX = 12;
@@ -1309,6 +1308,7 @@ var PROMPT_AUDIO_BREAKDOWN_NAME = "Spotify preview audio attached";
 var PROMPT_AUDIO_BREAKDOWN_CONTENT = "[Spotify Controls] The latest user turn includes an attached Spotify audio preview from Spotify.";
 var previewAudioCache = new Map;
 var promptAudioInterceptorRegistered = false;
+var promptAudioAttachedThisTurn = false;
 function normalizeModelId(model) {
   return model.trim().toLowerCase();
 }
@@ -1318,6 +1318,9 @@ function isAudioEnabledModel(model) {
   const normalized = normalizeModelId(model);
   if (AUDIO_ENABLED_MODELS.has(normalized))
     return true;
+  if (normalized.split(/[/:]/).some((segment) => segment.startsWith("gemini-3"))) {
+    return true;
+  }
   for (const candidate of AUDIO_ENABLED_MODELS) {
     if (normalized.endsWith(`/${candidate}`) || normalized.endsWith(`:${candidate}`) || normalized.includes(`/${candidate}:`) || normalized.includes(`:${candidate}/`)) {
       return true;
@@ -1510,6 +1513,7 @@ function logAndToastPromptAudioAttachment(userId, state, model, chatId) {
   });
 }
 async function maybeAttachSpotifyPreviewAudio(messages, rawContext) {
+  promptAudioAttachedThisTurn = false;
   const sanitizedMessages = stripAudioFromNonLastUserMessages(messages);
   const context = rawContext && typeof rawContext === "object" ? rawContext : {};
   if (context.generationType === "quiet")
@@ -1580,6 +1584,7 @@ async function maybeAttachSpotifyPreviewAudio(messages, rawContext) {
     return sanitizedMessages;
   }
   logAndToastPromptAudioAttachment(spotifyUserId, state, model, context.chatId);
+  promptAudioAttachedThisTurn = true;
   const withNote = insertPromptAudioBreakdownNote(attached.messages, attached.targetIndex);
   return {
     messages: withNote.messages,
@@ -1916,6 +1921,16 @@ spindle.registerMacro({
     } catch {
       return false;
     }
+  }
+});
+spindle.registerMacro({
+  name: "spotify_audio_attached",
+  category: "extension:spotify_controls",
+  description: "Returns whether a Spotify preview audio file was attached to the current user message",
+  returnType: "boolean",
+  volatile: true,
+  handler: async () => {
+    return promptAudioAttachedThisTurn;
   }
 });
 function pushPlaybackMacros(state) {
