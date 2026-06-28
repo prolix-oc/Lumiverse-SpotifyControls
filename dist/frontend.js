@@ -2210,7 +2210,7 @@ var PANEL_CSS = `
 `;
 
 // src/ui/settings.ts
-function createSettingsUI(sendToBackend, getServerBaseUrl) {
+function createSettingsUI(sendToBackend, getServerBaseUrl, onPromptAudioPreviewToggle) {
   const root = document.createElement("section");
   root.className = "spotify-settings-card";
   const header = document.createElement("header");
@@ -2261,6 +2261,29 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
     sendToBackend({ type: "save_lastfm_key", apiKey });
   });
   lastfmRow.appendChild(lastfmBtn);
+  const promptAudioWrap = document.createElement("label");
+  promptAudioWrap.className = "spotify-settings-label";
+  promptAudioWrap.style.display = "block";
+  const promptAudioRow = document.createElement("div");
+  promptAudioRow.className = "spotify-settings-row";
+  promptAudioRow.style.alignItems = "center";
+  promptAudioRow.style.gap = "10px";
+  const promptAudioToggle = document.createElement("input");
+  promptAudioToggle.type = "checkbox";
+  promptAudioToggle.style.margin = "0";
+  const promptAudioTextWrap = document.createElement("div");
+  promptAudioTextWrap.style.display = "grid";
+  promptAudioTextWrap.style.gap = "2px";
+  const promptAudioTitle = document.createElement("span");
+  promptAudioTitle.textContent = "Attach Spotify preview audio";
+  const promptAudioHint = document.createElement("span");
+  promptAudioHint.style.cssText = "font-size:0.8em;opacity:0.68";
+  promptAudioHint.textContent = "For eligible multimodal models only. Downloads Spotify's 30-second preview and attaches it to the latest user turn.";
+  promptAudioTextWrap.appendChild(promptAudioTitle);
+  promptAudioTextWrap.appendChild(promptAudioHint);
+  promptAudioRow.appendChild(promptAudioToggle);
+  promptAudioRow.appendChild(promptAudioTextWrap);
+  promptAudioWrap.appendChild(promptAudioRow);
   const callbackLabel = document.createElement("label");
   callbackLabel.className = "spotify-settings-label";
   callbackLabel.textContent = "Redirect URI";
@@ -2337,11 +2360,12 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
   body.appendChild(forwardLabel);
   body.appendChild(lastfmLabel);
   body.appendChild(lastfmRow);
+  body.appendChild(promptAudioWrap);
   body.appendChild(btnRow);
   root.appendChild(header);
   root.appendChild(body);
   let connected = false;
-  function updateUI(isConnected, clientId, hasSecret, hasLastfmKey, callbackPath) {
+  function updateUI(isConnected, clientId, hasSecret, hasLastfmKey, callbackPath, promptAudioPreviewEnabled) {
     connected = isConnected;
     if (clientId) {
       idInput.value = clientId;
@@ -2378,6 +2402,7 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
     } else {
       lastfmInput.placeholder = "Last.fm API Key (for recommendations)";
     }
+    promptAudioToggle.checked = !!promptAudioPreviewEnabled;
   }
   function setConnecting() {
     btn.textContent = "Connecting...";
@@ -2402,6 +2427,15 @@ function createSettingsUI(sendToBackend, getServerBaseUrl) {
         clientSecret: clientSecret || undefined,
         serverBaseUrl: getServerBaseUrl()
       });
+    }
+  });
+  promptAudioToggle.addEventListener("change", async () => {
+    const requested = promptAudioToggle.checked;
+    promptAudioToggle.disabled = true;
+    try {
+      promptAudioToggle.checked = await onPromptAudioPreviewToggle(requested);
+    } finally {
+      promptAudioToggle.disabled = false;
     }
   });
   updateUI(false, "");
@@ -5316,6 +5350,13 @@ function setup(ctx) {
   cleanups.push(removeStyle);
   let currentState = null;
   let connected = false;
+  let currentConfig = {
+    clientId: "",
+    hasSecret: false,
+    hasLastfmKey: false,
+    callbackUrl: undefined,
+    promptAudioPreviewEnabled: false
+  };
   let pendingSeekCommit = null;
   let pendingVolumeCommit = null;
   let pendingTrackSkip = null;
@@ -5583,7 +5624,25 @@ function setup(ctx) {
     });
   }
   const settingsMount = ctx.ui.mount("settings_extensions");
-  const settingsUI = createSettingsUI(sendToBackend, getServerBaseUrl);
+  const settingsUI = createSettingsUI(sendToBackend, getServerBaseUrl, async (enabled) => {
+    if (enabled) {
+      const granted = await ctx.permissions.getGranted();
+      if (!granted.includes("interceptor")) {
+        try {
+          const updatedGranted = await ctx.permissions.request(["interceptor"], {
+            reason: "Spotify Controls needs the Interceptor permission to attach the current track's preview audio to eligible multimodal model requests."
+          });
+          if (!updatedGranted.includes("interceptor")) {
+            return false;
+          }
+        } catch {
+          return false;
+        }
+      }
+    }
+    sendToBackend({ type: "set_prompt_audio_preview", enabled });
+    return enabled;
+  });
   settingsMount.appendChild(settingsUI.root);
   cleanups.push(() => settingsUI.destroy());
   let widgetSizeLabelTitle = null;
@@ -6134,7 +6193,14 @@ function setup(ctx) {
         break;
       }
       case "config":
-        settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey, msg.callbackUrl);
+        currentConfig = {
+          clientId: msg.clientId,
+          hasSecret: msg.hasSecret,
+          hasLastfmKey: msg.hasLastfmKey,
+          callbackUrl: msg.callbackUrl,
+          promptAudioPreviewEnabled: msg.promptAudioPreviewEnabled
+        };
+        settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey, msg.callbackUrl, msg.promptAudioPreviewEnabled);
         connected = msg.connected;
         syncWidgetVisibility();
         break;
@@ -6197,7 +6263,7 @@ function setup(ctx) {
         currentState = null;
         lastThemeArtUrl = null;
         clearAlbumTheme();
-        settingsUI.update(false, "");
+        settingsUI.update(false, currentConfig.clientId, currentConfig.hasSecret, currentConfig.hasLastfmKey, currentConfig.callbackUrl, currentConfig.promptAudioPreviewEnabled);
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
         miniPlayer.update(null, false);

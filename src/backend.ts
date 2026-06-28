@@ -1,5 +1,6 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
+import type { LlmMessageDTO, LlmMessagePartDTO } from "lumiverse-spindle-types";
 import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle, PlaybackState, SongSnapshot, MessageSongEntry } from "./types";
 import * as spotify from "./spotify-api";
 import {
@@ -75,9 +76,9 @@ function syncActiveUserState(userId: string) {
   lastStateUpdatedAt = session.lastStateUpdatedAt;
 }
 
-async function loadConfig(userId: string): Promise<SpotifyConfig> {
-  const stored = await spindle.userStorage.getJson<{ clientId: string }>("config.json", {
-    fallback: { clientId: "" },
+async function loadConfig(userId?: string): Promise<SpotifyConfig> {
+  const stored = await spindle.userStorage.getJson<{ clientId: string; promptAudioPreviewEnabled?: boolean }>("config.json", {
+    fallback: { clientId: "", promptAudioPreviewEnabled: false },
     userId,
   });
   const [clientSecret, lastfmApiKey] = await Promise.all([
@@ -88,11 +89,15 @@ async function loadConfig(userId: string): Promise<SpotifyConfig> {
     clientId: stored.clientId,
     clientSecret: clientSecret || "",
     lastfmApiKey: lastfmApiKey || undefined,
+    promptAudioPreviewEnabled: !!stored.promptAudioPreviewEnabled,
   };
 }
 
-async function saveConfig(config: SpotifyConfig, userId: string): Promise<void> {
-  await spindle.userStorage.setJson("config.json", { clientId: config.clientId }, { userId });
+async function saveConfig(config: SpotifyConfig, userId?: string): Promise<void> {
+  await spindle.userStorage.setJson("config.json", {
+    clientId: config.clientId,
+    promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled,
+  }, { userId });
   await Promise.all([
     config.clientSecret
       ? spindle.enclave.put("client_secret", config.clientSecret, userId)
@@ -156,7 +161,10 @@ async function migrateToEnclave(userId: string): Promise<void> {
       if (oldConfig.lastfmApiKey) {
         await spindle.enclave.put("lastfm_api_key", oldConfig.lastfmApiKey, userId);
       }
-      await spindle.userStorage.setJson("config.json", { clientId: oldConfig.clientId }, { userId });
+      await spindle.userStorage.setJson("config.json", {
+        clientId: oldConfig.clientId,
+        promptAudioPreviewEnabled: !!oldConfig.promptAudioPreviewEnabled,
+      }, { userId });
       spindle.log.info("Migrated config secrets to secure enclave");
     }
 
@@ -591,6 +599,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           connected: spotify.isConnected(userId),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey,
+          promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled,
         }, userId);
         break;
       }
@@ -598,7 +607,12 @@ spindle.onFrontendMessage(async (raw, userId) => {
       case "connect": {
         const { clientId, clientSecret, serverBaseUrl } = msg;
         const existing = await loadConfig(userId);
-        await saveConfig({ clientId, clientSecret: clientSecret || "", lastfmApiKey: existing.lastfmApiKey }, userId);
+        await saveConfig({
+          clientId,
+          clientSecret: clientSecret || "",
+          lastfmApiKey: existing.lastfmApiKey,
+          promptAudioPreviewEnabled: existing.promptAudioPreviewEnabled,
+        }, userId);
 
         const state = await spindle.oauth.createState();
         const codeVerifier = createCodeVerifier();
@@ -644,6 +658,22 @@ spindle.onFrontendMessage(async (raw, userId) => {
         }
         send({ type: "disconnected" }, userId);
         send({ type: "state", playbackState: null, connected: false }, userId);
+        break;
+      }
+
+      case "set_prompt_audio_preview": {
+        const config = await loadConfig(userId);
+        config.promptAudioPreviewEnabled = msg.enabled;
+        await saveConfig(config, userId);
+        send({
+          type: "config",
+          clientId: config.clientId,
+          hasSecret: !!config.clientSecret,
+          connected: spotify.isConnected(userId),
+          callbackUrl: spindle.oauth.getCallbackUrl(),
+          hasLastfmKey: !!config.lastfmApiKey,
+          promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled,
+        }, userId);
         break;
       }
 
@@ -724,6 +754,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           connected: spotify.isConnected(userId),
           callbackUrl: spindle.oauth.getCallbackUrl(),
           hasLastfmKey: !!config.lastfmApiKey,
+          promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled,
         }, userId);
         break;
       }
@@ -887,6 +918,238 @@ async function getSnapshotState(userId: string): Promise<PlaybackState | null> {
   return session.lastState;
 }
 
+// ─── Prompt audio attachment ───────────────────────────────────────────────
+
+type SpotifyAudioInterceptorContext = {
+  chatId?: string;
+  connectionId?: string;
+  generationType?: string;
+};
+
+type CorsBinaryResponse = {
+  status: number;
+  statusText?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  encoding?: string;
+};
+
+type PreviewAudioPayload = {
+  data: string;
+  mimeType: string;
+  fetchedAt: number;
+};
+
+const AUDIO_ENABLED_MODELS = new Set([
+  "gemini-3-pro-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3-flash",
+  "gemini-3.5-flash",
+  "kimi-k2.5",
+  "kimi-k2.6",
+].map((model) => model.toLowerCase()));
+
+const PREVIEW_AUDIO_CACHE_TTL_MS = 30 * 60_000;
+const PREVIEW_AUDIO_CACHE_MAX = 12;
+const PREVIEW_AUDIO_MAX_BASE64_CHARS = 2_000_000;
+
+const previewAudioCache = new Map<string, PreviewAudioPayload>();
+let promptAudioInterceptorRegistered = false;
+
+function normalizeModelId(model: string): string {
+  return model.trim().toLowerCase();
+}
+
+function isAudioEnabledModel(model: string | null | undefined): boolean {
+  return !!model && AUDIO_ENABLED_MODELS.has(normalizeModelId(model));
+}
+
+function resolveConnectedSpotifyUserId(): string | null {
+  if (activeUserId && spotify.isConnected(activeUserId)) return activeUserId;
+  for (const userId of sessions.keys()) {
+    if (spotify.isConnected(userId)) return userId;
+  }
+  return null;
+}
+
+async function resolveInterceptorModel(context: SpotifyAudioInterceptorContext): Promise<string | null> {
+  const connectionId = typeof context.connectionId === "string" ? context.connectionId : null;
+  if (connectionId) {
+    return (await spindle.connections.get(connectionId))?.model?.trim() || null;
+  }
+  const defaultConnection = (await spindle.connections.list()).find((connection) => connection.is_default);
+  return defaultConnection?.model?.trim() || null;
+}
+
+function touchPreviewAudioCache(previewUrl: string, payload: PreviewAudioPayload): void {
+  previewAudioCache.delete(previewUrl);
+  previewAudioCache.set(previewUrl, payload);
+  while (previewAudioCache.size > PREVIEW_AUDIO_CACHE_MAX) {
+    const oldest = previewAudioCache.keys().next().value;
+    if (!oldest) break;
+    previewAudioCache.delete(oldest);
+  }
+}
+
+function readCachedPreviewAudio(previewUrl: string): PreviewAudioPayload | null {
+  const cached = previewAudioCache.get(previewUrl);
+  if (!cached) return null;
+  if (Date.now() - cached.fetchedAt > PREVIEW_AUDIO_CACHE_TTL_MS) {
+    previewAudioCache.delete(previewUrl);
+    return null;
+  }
+  touchPreviewAudioCache(previewUrl, cached);
+  return cached;
+}
+
+function readHeader(headers: Record<string, string> | undefined, name: string): string | null {
+  if (!headers) return null;
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return null;
+}
+
+function normalizeMimeType(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const mimeType = value.split(";")[0]?.trim().toLowerCase();
+  return mimeType || null;
+}
+
+function findLastUserMessageIndex(messages: LlmMessageDTO[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "user") return i;
+  }
+  return -1;
+}
+
+function stripAudioPartsFromUserMessage(message: LlmMessageDTO): LlmMessageDTO {
+  if (typeof message.content === "string") return message;
+  const nextContent = message.content.filter((part) => part.type !== "audio");
+  if (nextContent.length === message.content.length) return message;
+  return { ...message, content: nextContent.length > 0 ? nextContent : "" };
+}
+
+function stripAudioFromNonLastUserMessages(messages: LlmMessageDTO[]): LlmMessageDTO[] {
+  const lastUserIndex = findLastUserMessageIndex(messages);
+  if (lastUserIndex < 0) return messages;
+
+  let changed = false;
+  const nextMessages = messages.map((message, index) => {
+    if (message.role !== "user" || index === lastUserIndex) return message;
+    const nextMessage = stripAudioPartsFromUserMessage(message);
+    if (nextMessage !== message) changed = true;
+    return nextMessage;
+  });
+  return changed ? nextMessages : messages;
+}
+
+async function getPreviewAudioPayload(previewUrl: string): Promise<PreviewAudioPayload | null> {
+  const cached = readCachedPreviewAudio(previewUrl);
+  if (cached) return cached;
+
+  let response: CorsBinaryResponse;
+  try {
+    response = (await spindle.cors(previewUrl, {
+      responseType: "arraybuffer",
+      mediaType: "audio",
+    })) as CorsBinaryResponse;
+  } catch (err: any) {
+    spindle.log.warn(`Spotify preview download failed: ${err?.message || err}`);
+    return null;
+  }
+
+  if (response.status !== 200 || !response.body) return null;
+  if (response.encoding && response.encoding !== "base64") return null;
+  if (response.body.length > PREVIEW_AUDIO_MAX_BASE64_CHARS) {
+    spindle.log.warn(`Spotify preview skipped: base64 payload exceeded ${PREVIEW_AUDIO_MAX_BASE64_CHARS} chars`);
+    return null;
+  }
+
+  const payload: PreviewAudioPayload = {
+    data: response.body,
+    mimeType: normalizeMimeType(readHeader(response.headers, "content-type")) || "audio/mpeg",
+    fetchedAt: Date.now(),
+  };
+  touchPreviewAudioCache(previewUrl, payload);
+  return payload;
+}
+
+function appendAudioPart(
+  content: string | LlmMessagePartDTO[],
+  audioPart: Extract<LlmMessagePartDTO, { type: "audio" }>,
+): LlmMessagePartDTO[] | null {
+  if (typeof content === "string") {
+    return content ? [{ type: "text", text: content }, audioPart] : [audioPart];
+  }
+  if (content.some((part) => part.type === "audio")) return null;
+  return [...content, audioPart];
+}
+
+function canAttachAudioToLastUserMessage(message: LlmMessageDTO): boolean {
+  if (message.role !== "user") return false;
+  if (typeof message.content === "string") return true;
+  return message.content.some((part) => part.type !== "tool_result");
+}
+
+function attachPreviewAudioToLastUserMessage(
+  messages: LlmMessageDTO[],
+  previewAudio: PreviewAudioPayload,
+): LlmMessageDTO[] {
+  const targetIndex = findLastUserMessageIndex(messages);
+  if (targetIndex < 0) return messages;
+
+  const target = messages[targetIndex];
+  if (!canAttachAudioToLastUserMessage(target)) return messages;
+  const nextContent = appendAudioPart(target.content, {
+    type: "audio",
+    data: previewAudio.data,
+    mime_type: previewAudio.mimeType,
+  });
+  if (!nextContent) return messages;
+
+  const nextMessages = messages.slice();
+  nextMessages[targetIndex] = { ...target, content: nextContent };
+  return nextMessages;
+}
+
+async function maybeAttachSpotifyPreviewAudio(
+  messages: LlmMessageDTO[],
+  rawContext: unknown,
+): Promise<LlmMessageDTO[]> {
+  const sanitizedMessages = stripAudioFromNonLastUserMessages(messages);
+  const context = rawContext && typeof rawContext === "object"
+    ? rawContext as SpotifyAudioInterceptorContext
+    : {};
+
+  if (context.generationType === "quiet") return sanitizedMessages;
+
+  const config = await loadConfig().catch(() => null);
+  if (!config?.promptAudioPreviewEnabled) return sanitizedMessages;
+
+  let model: string | null;
+  try {
+    model = await resolveInterceptorModel(context);
+  } catch (err: any) {
+    spindle.log.warn(`Spotify prompt audio model lookup failed: ${err?.message || err}`);
+    return sanitizedMessages;
+  }
+  if (!isAudioEnabledModel(model)) return sanitizedMessages;
+
+  const spotifyUserId = resolveConnectedSpotifyUserId();
+  if (!spotifyUserId) return sanitizedMessages;
+
+  const state = await getSnapshotState(spotifyUserId).catch(() => null);
+  const previewUrl = state?.previewUrl;
+  if (!previewUrl) return sanitizedMessages;
+
+  const previewAudio = await getPreviewAudioPayload(previewUrl);
+  if (!previewAudio) return sanitizedMessages;
+
+  return attachPreviewAudioToLastUserMessage(sanitizedMessages, previewAudio);
+}
+
 function readSpindleMeta(message: MsgLike): Record<string, unknown> {
   // Event payloads carry spindle metadata under extra.spindle_metadata; the
   // normalized getMessages() shape surfaces it on `metadata`. Support both.
@@ -1030,10 +1293,22 @@ function setupGenerationCapture(): void {
   }
 }
 
+function setupPromptAudioInterceptor(): void {
+  if (promptAudioInterceptorRegistered) return;
+  try {
+    spindle.registerInterceptor(async (messages, context) => maybeAttachSpotifyPreviewAudio(messages, context));
+    promptAudioInterceptorRegistered = true;
+  } catch (err: any) {
+    spindle.log.warn(`Spotify prompt audio interceptor register failed: ${err?.message}`);
+  }
+}
+
+setupPromptAudioInterceptor();
 setupGenerationCapture();
 
 spindle.permissions.onChanged(({ permission, granted }) => {
   if (permission === "generation" && granted) setupGenerationCapture();
+  if (permission === "interceptor" && granted) setupPromptAudioInterceptor();
 });
 
 /** Read every assistant message's stored snapshots and push them to the client. */

@@ -6,6 +6,7 @@ export type FrontendToBackend =
   | { type: "connect"; clientId: string; clientSecret?: string; serverBaseUrl: string }
   | { type: "complete_auth_callback"; callbackUrl: string }
   | { type: "disconnect" }
+  | { type: "set_prompt_audio_preview"; enabled: boolean }
   | { type: "play"; trackUri?: string; contextUri?: string }
   | { type: "pause" }
   | { type: "next" }
@@ -29,7 +30,15 @@ export type FrontendToBackend =
 
 export type BackendToFrontend =
   | { type: "state"; playbackState: PlaybackState | null; connected: boolean }
-  | { type: "config"; clientId: string; hasSecret: boolean; connected: boolean; callbackUrl: string; hasLastfmKey: boolean }
+  | {
+    type: "config";
+    clientId: string;
+    hasSecret: boolean;
+    connected: boolean;
+    callbackUrl: string;
+    hasLastfmKey: boolean;
+    promptAudioPreviewEnabled: boolean;
+  }
   | { type: "search_results"; results: SearchResult[] }
   | { type: "auth_url"; url: string }
   | { type: "connected" }
@@ -49,6 +58,7 @@ export interface PlaybackState {
   artistName: string;
   albumName: string;
   albumArtUrl: string | null;
+  previewUrl: string | null;
   progressMs: number;
   durationMs: number;
   shuffleState: boolean;
@@ -137,6 +147,7 @@ export interface SpotifyConfig {
   clientId: string;
   clientSecret: string;
   lastfmApiKey?: string;
+  promptAudioPreviewEnabled?: boolean;
 }
 
 export interface TokenData {

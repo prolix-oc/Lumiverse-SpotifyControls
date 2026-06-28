@@ -206,6 +206,11 @@ function parsePlaybackState(data: any): PlaybackState | null {
     artistName: (data.item.artists || []).map((a: any) => a.name).join(", "),
     albumName: data.item.album?.name || "",
     albumArtUrl: images.length > 0 ? images[images.length > 1 ? 1 : 0].url : null,
+    previewUrl: typeof data.item.preview_url === "string"
+      ? data.item.preview_url
+      : typeof data.item.audio_preview_url === "string"
+        ? data.item.audio_preview_url
+        : null,
     progressMs: data.progress_ms || 0,
     durationMs: data.item.duration_ms || 0,
     shuffleState: data.shuffle_state || false,

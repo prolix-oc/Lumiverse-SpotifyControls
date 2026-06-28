@@ -146,6 +146,7 @@ function parsePlaybackState(data) {
     artistName: (data.item.artists || []).map((a) => a.name).join(", "),
     albumName: data.item.album?.name || "",
     albumArtUrl: images.length > 0 ? images[images.length > 1 ? 1 : 0].url : null,
+    previewUrl: typeof data.item.preview_url === "string" ? data.item.preview_url : typeof data.item.audio_preview_url === "string" ? data.item.audio_preview_url : null,
     progressMs: data.progress_ms || 0,
     durationMs: data.item.duration_ms || 0,
     shuffleState: data.shuffle_state || false,
@@ -503,7 +504,7 @@ function syncActiveUserState(userId) {
 }
 async function loadConfig(userId) {
   const stored = await spindle.userStorage.getJson("config.json", {
-    fallback: { clientId: "" },
+    fallback: { clientId: "", promptAudioPreviewEnabled: false },
     userId
   });
   const [clientSecret, lastfmApiKey] = await Promise.all([
@@ -513,11 +514,15 @@ async function loadConfig(userId) {
   return {
     clientId: stored.clientId,
     clientSecret: clientSecret || "",
-    lastfmApiKey: lastfmApiKey || undefined
+    lastfmApiKey: lastfmApiKey || undefined,
+    promptAudioPreviewEnabled: !!stored.promptAudioPreviewEnabled
   };
 }
 async function saveConfig(config, userId) {
-  await spindle.userStorage.setJson("config.json", { clientId: config.clientId }, { userId });
+  await spindle.userStorage.setJson("config.json", {
+    clientId: config.clientId,
+    promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled
+  }, { userId });
   await Promise.all([
     config.clientSecret ? spindle.enclave.put("client_secret", config.clientSecret, userId) : spindle.enclave.delete("client_secret", userId),
     config.lastfmApiKey ? spindle.enclave.put("lastfm_api_key", config.lastfmApiKey, userId) : Promise.resolve()
@@ -568,7 +573,10 @@ async function migrateToEnclave(userId) {
       if (oldConfig.lastfmApiKey) {
         await spindle.enclave.put("lastfm_api_key", oldConfig.lastfmApiKey, userId);
       }
-      await spindle.userStorage.setJson("config.json", { clientId: oldConfig.clientId }, { userId });
+      await spindle.userStorage.setJson("config.json", {
+        clientId: oldConfig.clientId,
+        promptAudioPreviewEnabled: !!oldConfig.promptAudioPreviewEnabled
+      }, { userId });
       spindle.log.info("Migrated config secrets to secure enclave");
     }
     try {
@@ -924,14 +932,20 @@ spindle.onFrontendMessage(async (raw, userId) => {
           hasSecret: !!config.clientSecret,
           connected: isConnected(userId),
           callbackUrl: spindle.oauth.getCallbackUrl(),
-          hasLastfmKey: !!config.lastfmApiKey
+          hasLastfmKey: !!config.lastfmApiKey,
+          promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled
         }, userId);
         break;
       }
       case "connect": {
         const { clientId, clientSecret, serverBaseUrl } = msg;
         const existing = await loadConfig(userId);
-        await saveConfig({ clientId, clientSecret: clientSecret || "", lastfmApiKey: existing.lastfmApiKey }, userId);
+        await saveConfig({
+          clientId,
+          clientSecret: clientSecret || "",
+          lastfmApiKey: existing.lastfmApiKey,
+          promptAudioPreviewEnabled: existing.promptAudioPreviewEnabled
+        }, userId);
         const state = await spindle.oauth.createState();
         const codeVerifier = createCodeVerifier();
         const codeChallenge = await createCodeChallenge(codeVerifier);
@@ -971,6 +985,21 @@ spindle.onFrontendMessage(async (raw, userId) => {
         }
         send({ type: "disconnected" }, userId);
         send({ type: "state", playbackState: null, connected: false }, userId);
+        break;
+      }
+      case "set_prompt_audio_preview": {
+        const config = await loadConfig(userId);
+        config.promptAudioPreviewEnabled = msg.enabled;
+        await saveConfig(config, userId);
+        send({
+          type: "config",
+          clientId: config.clientId,
+          hasSecret: !!config.clientSecret,
+          connected: isConnected(userId),
+          callbackUrl: spindle.oauth.getCallbackUrl(),
+          hasLastfmKey: !!config.lastfmApiKey,
+          promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled
+        }, userId);
         break;
       }
       case "play":
@@ -1038,7 +1067,8 @@ spindle.onFrontendMessage(async (raw, userId) => {
           hasSecret: !!config.clientSecret,
           connected: isConnected(userId),
           callbackUrl: spindle.oauth.getCallbackUrl(),
-          hasLastfmKey: !!config.lastfmApiKey
+          hasLastfmKey: !!config.lastfmApiKey,
+          promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled
         }, userId);
         break;
       }
@@ -1163,6 +1193,201 @@ async function getSnapshotState(userId) {
       return fresh;
   }
   return session.lastState;
+}
+var AUDIO_ENABLED_MODELS = new Set([
+  "gemini-3-pro-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3-flash",
+  "gemini-3.5-flash",
+  "kimi-k2.5",
+  "kimi-k2.6"
+].map((model) => model.toLowerCase()));
+var PREVIEW_AUDIO_CACHE_TTL_MS = 30 * 60000;
+var PREVIEW_AUDIO_CACHE_MAX = 12;
+var PREVIEW_AUDIO_MAX_BASE64_CHARS = 2000000;
+var previewAudioCache = new Map;
+var promptAudioInterceptorRegistered = false;
+function normalizeModelId(model) {
+  return model.trim().toLowerCase();
+}
+function isAudioEnabledModel(model) {
+  return !!model && AUDIO_ENABLED_MODELS.has(normalizeModelId(model));
+}
+function resolveConnectedSpotifyUserId() {
+  if (activeUserId2 && isConnected(activeUserId2))
+    return activeUserId2;
+  for (const userId of sessions.keys()) {
+    if (isConnected(userId))
+      return userId;
+  }
+  return null;
+}
+async function resolveInterceptorModel(context) {
+  const connectionId = typeof context.connectionId === "string" ? context.connectionId : null;
+  if (connectionId) {
+    return (await spindle.connections.get(connectionId))?.model?.trim() || null;
+  }
+  const defaultConnection = (await spindle.connections.list()).find((connection) => connection.is_default);
+  return defaultConnection?.model?.trim() || null;
+}
+function touchPreviewAudioCache(previewUrl, payload) {
+  previewAudioCache.delete(previewUrl);
+  previewAudioCache.set(previewUrl, payload);
+  while (previewAudioCache.size > PREVIEW_AUDIO_CACHE_MAX) {
+    const oldest = previewAudioCache.keys().next().value;
+    if (!oldest)
+      break;
+    previewAudioCache.delete(oldest);
+  }
+}
+function readCachedPreviewAudio(previewUrl) {
+  const cached = previewAudioCache.get(previewUrl);
+  if (!cached)
+    return null;
+  if (Date.now() - cached.fetchedAt > PREVIEW_AUDIO_CACHE_TTL_MS) {
+    previewAudioCache.delete(previewUrl);
+    return null;
+  }
+  touchPreviewAudioCache(previewUrl, cached);
+  return cached;
+}
+function readHeader(headers, name) {
+  if (!headers)
+    return null;
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target)
+      return value;
+  }
+  return null;
+}
+function normalizeMimeType(value) {
+  if (!value)
+    return null;
+  const mimeType = value.split(";")[0]?.trim().toLowerCase();
+  return mimeType || null;
+}
+function findLastUserMessageIndex(messages) {
+  for (let i = messages.length - 1;i >= 0; i -= 1) {
+    if (messages[i].role === "user")
+      return i;
+  }
+  return -1;
+}
+function stripAudioPartsFromUserMessage(message) {
+  if (typeof message.content === "string")
+    return message;
+  const nextContent = message.content.filter((part) => part.type !== "audio");
+  if (nextContent.length === message.content.length)
+    return message;
+  return { ...message, content: nextContent.length > 0 ? nextContent : "" };
+}
+function stripAudioFromNonLastUserMessages(messages) {
+  const lastUserIndex = findLastUserMessageIndex(messages);
+  if (lastUserIndex < 0)
+    return messages;
+  let changed = false;
+  const nextMessages = messages.map((message, index) => {
+    if (message.role !== "user" || index === lastUserIndex)
+      return message;
+    const nextMessage = stripAudioPartsFromUserMessage(message);
+    if (nextMessage !== message)
+      changed = true;
+    return nextMessage;
+  });
+  return changed ? nextMessages : messages;
+}
+async function getPreviewAudioPayload(previewUrl) {
+  const cached = readCachedPreviewAudio(previewUrl);
+  if (cached)
+    return cached;
+  let response;
+  try {
+    response = await spindle.cors(previewUrl, {
+      responseType: "arraybuffer",
+      mediaType: "audio"
+    });
+  } catch (err) {
+    spindle.log.warn(`Spotify preview download failed: ${err?.message || err}`);
+    return null;
+  }
+  if (response.status !== 200 || !response.body)
+    return null;
+  if (response.encoding && response.encoding !== "base64")
+    return null;
+  if (response.body.length > PREVIEW_AUDIO_MAX_BASE64_CHARS) {
+    spindle.log.warn(`Spotify preview skipped: base64 payload exceeded ${PREVIEW_AUDIO_MAX_BASE64_CHARS} chars`);
+    return null;
+  }
+  const payload = {
+    data: response.body,
+    mimeType: normalizeMimeType(readHeader(response.headers, "content-type")) || "audio/mpeg",
+    fetchedAt: Date.now()
+  };
+  touchPreviewAudioCache(previewUrl, payload);
+  return payload;
+}
+function appendAudioPart(content, audioPart) {
+  if (typeof content === "string") {
+    return content ? [{ type: "text", text: content }, audioPart] : [audioPart];
+  }
+  if (content.some((part) => part.type === "audio"))
+    return null;
+  return [...content, audioPart];
+}
+function canAttachAudioToLastUserMessage(message) {
+  if (message.role !== "user")
+    return false;
+  if (typeof message.content === "string")
+    return true;
+  return message.content.some((part) => part.type !== "tool_result");
+}
+function attachPreviewAudioToLastUserMessage(messages, previewAudio) {
+  const targetIndex = findLastUserMessageIndex(messages);
+  if (targetIndex < 0)
+    return messages;
+  const target = messages[targetIndex];
+  if (!canAttachAudioToLastUserMessage(target))
+    return messages;
+  const nextContent = appendAudioPart(target.content, {
+    type: "audio",
+    data: previewAudio.data,
+    mime_type: previewAudio.mimeType
+  });
+  if (!nextContent)
+    return messages;
+  const nextMessages = messages.slice();
+  nextMessages[targetIndex] = { ...target, content: nextContent };
+  return nextMessages;
+}
+async function maybeAttachSpotifyPreviewAudio(messages, rawContext) {
+  const sanitizedMessages = stripAudioFromNonLastUserMessages(messages);
+  const context = rawContext && typeof rawContext === "object" ? rawContext : {};
+  if (context.generationType === "quiet")
+    return sanitizedMessages;
+  const config = await loadConfig().catch(() => null);
+  if (!config?.promptAudioPreviewEnabled)
+    return sanitizedMessages;
+  let model;
+  try {
+    model = await resolveInterceptorModel(context);
+  } catch (err) {
+    spindle.log.warn(`Spotify prompt audio model lookup failed: ${err?.message || err}`);
+    return sanitizedMessages;
+  }
+  if (!isAudioEnabledModel(model))
+    return sanitizedMessages;
+  const spotifyUserId = resolveConnectedSpotifyUserId();
+  if (!spotifyUserId)
+    return sanitizedMessages;
+  const state = await getSnapshotState(spotifyUserId).catch(() => null);
+  const previewUrl = state?.previewUrl;
+  if (!previewUrl)
+    return sanitizedMessages;
+  const previewAudio = await getPreviewAudioPayload(previewUrl);
+  if (!previewAudio)
+    return sanitizedMessages;
+  return attachPreviewAudioToLastUserMessage(sanitizedMessages, previewAudio);
 }
 function readSpindleMeta(message) {
   const fromMeta = message.metadata;
@@ -1289,10 +1514,23 @@ function setupGenerationCapture() {
     spindle.log.warn(`Generation capture subscribe failed: ${err?.message}`);
   }
 }
+function setupPromptAudioInterceptor() {
+  if (promptAudioInterceptorRegistered)
+    return;
+  try {
+    spindle.registerInterceptor(async (messages, context) => maybeAttachSpotifyPreviewAudio(messages, context));
+    promptAudioInterceptorRegistered = true;
+  } catch (err) {
+    spindle.log.warn(`Spotify prompt audio interceptor register failed: ${err?.message}`);
+  }
+}
+setupPromptAudioInterceptor();
 setupGenerationCapture();
 spindle.permissions.onChanged(({ permission, granted }) => {
   if (permission === "generation" && granted)
     setupGenerationCapture();
+  if (permission === "interceptor" && granted)
+    setupPromptAudioInterceptor();
 });
 async function sendChatSongs(chatId, userId) {
   if (!chatId)

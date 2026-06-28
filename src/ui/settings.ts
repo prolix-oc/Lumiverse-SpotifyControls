@@ -1,13 +1,21 @@
 export interface SettingsUI {
   root: HTMLElement;
-  update(connected: boolean, clientId: string, hasSecret?: boolean, hasLastfmKey?: boolean, callbackPath?: string): void;
+  update(
+    connected: boolean,
+    clientId: string,
+    hasSecret?: boolean,
+    hasLastfmKey?: boolean,
+    callbackPath?: string,
+    promptAudioPreviewEnabled?: boolean,
+  ): void;
   setConnecting(): void;
   destroy(): void;
 }
 
 export function createSettingsUI(
   sendToBackend: (msg: unknown) => void,
-  getServerBaseUrl: () => string
+  getServerBaseUrl: () => string,
+  onPromptAudioPreviewToggle: (enabled: boolean) => Promise<boolean>,
 ): SettingsUI {
   // Outer card wrapper (matches SimTracker settings pattern)
   const root = document.createElement("section");
@@ -75,6 +83,36 @@ export function createSettingsUI(
     sendToBackend({ type: "save_lastfm_key", apiKey });
   });
   lastfmRow.appendChild(lastfmBtn);
+
+  const promptAudioWrap = document.createElement("label");
+  promptAudioWrap.className = "spotify-settings-label";
+  promptAudioWrap.style.display = "block";
+
+  const promptAudioRow = document.createElement("div");
+  promptAudioRow.className = "spotify-settings-row";
+  promptAudioRow.style.alignItems = "center";
+  promptAudioRow.style.gap = "10px";
+
+  const promptAudioToggle = document.createElement("input");
+  promptAudioToggle.type = "checkbox";
+  promptAudioToggle.style.margin = "0";
+
+  const promptAudioTextWrap = document.createElement("div");
+  promptAudioTextWrap.style.display = "grid";
+  promptAudioTextWrap.style.gap = "2px";
+
+  const promptAudioTitle = document.createElement("span");
+  promptAudioTitle.textContent = "Attach Spotify preview audio";
+
+  const promptAudioHint = document.createElement("span");
+  promptAudioHint.style.cssText = "font-size:0.8em;opacity:0.68";
+  promptAudioHint.textContent = "For eligible multimodal models only. Downloads Spotify's 30-second preview and attaches it to the latest user turn.";
+
+  promptAudioTextWrap.appendChild(promptAudioTitle);
+  promptAudioTextWrap.appendChild(promptAudioHint);
+  promptAudioRow.appendChild(promptAudioToggle);
+  promptAudioRow.appendChild(promptAudioTextWrap);
+  promptAudioWrap.appendChild(promptAudioRow);
 
   // Callback URL (copyable)
   const callbackLabel = document.createElement("label");
@@ -164,6 +202,7 @@ export function createSettingsUI(
   body.appendChild(forwardLabel);
   body.appendChild(lastfmLabel);
   body.appendChild(lastfmRow);
+  body.appendChild(promptAudioWrap);
   body.appendChild(btnRow);
 
   root.appendChild(header);
@@ -171,7 +210,14 @@ export function createSettingsUI(
 
   let connected = false;
 
-  function updateUI(isConnected: boolean, clientId: string, hasSecret?: boolean, hasLastfmKey?: boolean, callbackPath?: string) {
+  function updateUI(
+    isConnected: boolean,
+    clientId: string,
+    hasSecret?: boolean,
+    hasLastfmKey?: boolean,
+    callbackPath?: string,
+    promptAudioPreviewEnabled?: boolean,
+  ) {
     connected = isConnected;
     if (clientId) {
       idInput.value = clientId;
@@ -212,6 +258,7 @@ export function createSettingsUI(
     } else {
       lastfmInput.placeholder = "Last.fm API Key (for recommendations)";
     }
+    promptAudioToggle.checked = !!promptAudioPreviewEnabled;
   }
 
   function setConnecting() {
@@ -238,6 +285,16 @@ export function createSettingsUI(
         clientSecret: clientSecret || undefined,
         serverBaseUrl: getServerBaseUrl(),
       });
+    }
+  });
+
+  promptAudioToggle.addEventListener("change", async () => {
+    const requested = promptAudioToggle.checked;
+    promptAudioToggle.disabled = true;
+    try {
+      promptAudioToggle.checked = await onPromptAudioPreviewToggle(requested);
+    } finally {
+      promptAudioToggle.disabled = false;
     }
   });
 

@@ -109,6 +109,13 @@ export function setup(ctx: SpindleFrontendContext) {
   // State
   let currentState: PlaybackState | null = null;
   let connected = false;
+  let currentConfig = {
+    clientId: "",
+    hasSecret: false,
+    hasLastfmKey: false,
+    callbackUrl: undefined as string | undefined,
+    promptAudioPreviewEnabled: false,
+  };
   let pendingSeekCommit: PendingSeekCommit | null = null;
   let pendingVolumeCommit: PendingVolumeCommit | null = null;
   let pendingTrackSkip: PendingTrackSkip | null = null;
@@ -414,7 +421,25 @@ export function setup(ctx: SpindleFrontendContext) {
   // ─── Settings (in settings_extensions mount) ──────────────────────────
 
   const settingsMount = ctx.ui.mount("settings_extensions");
-  const settingsUI = createSettingsUI(sendToBackend, getServerBaseUrl);
+  const settingsUI = createSettingsUI(sendToBackend, getServerBaseUrl, async (enabled) => {
+    if (enabled) {
+      const granted = await ctx.permissions.getGranted();
+      if (!granted.includes("interceptor")) {
+        try {
+          const updatedGranted = await ctx.permissions.request(["interceptor"], {
+            reason: "Spotify Controls needs the Interceptor permission to attach the current track's preview audio to eligible multimodal model requests.",
+          });
+          if (!updatedGranted.includes("interceptor")) {
+            return false;
+          }
+        } catch {
+          return false;
+        }
+      }
+    }
+    sendToBackend({ type: "set_prompt_audio_preview", enabled });
+    return enabled;
+  });
   settingsMount.appendChild(settingsUI.root);
   cleanups.push(() => settingsUI.destroy());
 
@@ -1085,7 +1110,21 @@ export function setup(ctx: SpindleFrontendContext) {
       }
 
       case "config":
-        settingsUI.update(msg.connected, msg.clientId, msg.hasSecret, msg.hasLastfmKey, msg.callbackUrl);
+        currentConfig = {
+          clientId: msg.clientId,
+          hasSecret: msg.hasSecret,
+          hasLastfmKey: msg.hasLastfmKey,
+          callbackUrl: msg.callbackUrl,
+          promptAudioPreviewEnabled: msg.promptAudioPreviewEnabled,
+        };
+        settingsUI.update(
+          msg.connected,
+          msg.clientId,
+          msg.hasSecret,
+          msg.hasLastfmKey,
+          msg.callbackUrl,
+          msg.promptAudioPreviewEnabled,
+        );
         connected = msg.connected;
         syncWidgetVisibility();
         break;
@@ -1164,7 +1203,14 @@ export function setup(ctx: SpindleFrontendContext) {
         currentState = null;
         lastThemeArtUrl = null;
         clearAlbumTheme();
-        settingsUI.update(false, "");
+        settingsUI.update(
+          false,
+          currentConfig.clientId,
+          currentConfig.hasSecret,
+          currentConfig.hasLastfmKey,
+          currentConfig.callbackUrl,
+          currentConfig.promptAudioPreviewEnabled,
+        );
         nowPlayingUI.update(null, false);
         controlsUI.update(null, false);
         miniPlayer.update(null, false);
