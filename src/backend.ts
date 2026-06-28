@@ -1,6 +1,10 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
-import type { InterceptorResultDTO, LlmMessageDTO, LlmMessagePartDTO } from "lumiverse-spindle-types";
+import type { InterceptorResultDTO, LlmMessageDTO } from "lumiverse-spindle-types";
+
+// lumiverse-spindle-types exports LlmMessageDTO but not its part union; derive
+// the part type from the array branch of LlmMessageDTO.content.
+type LlmMessagePartDTO = Extract<LlmMessageDTO["content"], unknown[]>[number];
 import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle, PlaybackState, SongSnapshot, MessageSongEntry } from "./types";
 import * as spotify from "./spotify-api";
 import {
@@ -942,7 +946,7 @@ async function getSnapshotState(userId: string): Promise<PlaybackState | null> {
 // ─── Prompt audio attachment ───────────────────────────────────────────────
 
 type SpotifyAudioInterceptorContext = {
-  chatId?: string;
+  chatId?: string | null;
   connectionId?: string;
   generationType?: string;
   userId?: string;
@@ -1191,8 +1195,8 @@ function formatPromptAudioTrackLabel(state: PlaybackState): string {
 function logAndToastPromptAudioAttachment(
   userId: string,
   state: PlaybackState,
-  model: string,
-  chatId?: string,
+  model: string | null,
+  chatId?: string | null,
 ): void {
   const trackLabel = formatPromptAudioTrackLabel(state);
   spindle.log.info(
