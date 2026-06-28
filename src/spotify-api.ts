@@ -197,6 +197,55 @@ export async function getCurrentPlayback(userId?: string): Promise<PlaybackState
   return parsePlaybackState(JSON.parse(res.body));
 }
 
+export type TrackPreviewVerification = {
+  trackId: string | null;
+  previewUrl: string | null;
+  verified: boolean;
+  status: number | null;
+};
+
+function parsePreviewUrl(track: any): string | null {
+  return typeof track?.preview_url === "string"
+    ? track.preview_url
+    : typeof track?.audio_preview_url === "string"
+      ? track.audio_preview_url
+      : null;
+}
+
+function parseTrackIdFromUri(trackUri: string): string | null {
+  const match = /^spotify:track:([A-Za-z0-9]+)$/.exec(trackUri.trim());
+  return match?.[1] ?? null;
+}
+
+export async function verifyTrackPreviewUrl(trackUri: string, userId?: string): Promise<TrackPreviewVerification> {
+  const trackId = parseTrackIdFromUri(trackUri);
+  if (!trackId) {
+    return {
+      trackId: null,
+      previewUrl: null,
+      verified: false,
+      status: null,
+    };
+  }
+
+  const res = await spotifyFetch(`/tracks/${encodeURIComponent(trackId)}`, {}, userId);
+  if (res.status !== 200 || !res.body || res.body.trim() === "") {
+    return {
+      trackId,
+      previewUrl: null,
+      verified: false,
+      status: res.status,
+    };
+  }
+
+  return {
+    trackId,
+    previewUrl: parsePreviewUrl(JSON.parse(res.body)),
+    verified: true,
+    status: res.status,
+  };
+}
+
 function parsePlaybackState(data: any): PlaybackState | null {
   if (!data?.item) return null;
   const images = data.item.album?.images ?? [];
@@ -206,11 +255,7 @@ function parsePlaybackState(data: any): PlaybackState | null {
     artistName: (data.item.artists || []).map((a: any) => a.name).join(", "),
     albumName: data.item.album?.name || "",
     albumArtUrl: images.length > 0 ? images[images.length > 1 ? 1 : 0].url : null,
-    previewUrl: typeof data.item.preview_url === "string"
-      ? data.item.preview_url
-      : typeof data.item.audio_preview_url === "string"
-        ? data.item.audio_preview_url
-        : null,
+    previewUrl: parsePreviewUrl(data.item),
     progressMs: data.progress_ms || 0,
     durationMs: data.item.duration_ms || 0,
     shuffleState: data.shuffle_state || false,

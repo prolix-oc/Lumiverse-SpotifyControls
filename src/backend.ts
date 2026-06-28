@@ -1260,13 +1260,52 @@ async function maybeAttachSpotifyPreviewAudio(
     );
     return sanitizedMessages;
   }
-  const previewUrl = state?.previewUrl;
+  let previewUrl = state.previewUrl;
+  let previewVerification: spotify.TrackPreviewVerification | null = null;
+  if (!previewUrl && state.trackUri) {
+    previewVerification = await spotify.verifyTrackPreviewUrl(state.trackUri, spotifyUserId).catch((err: any) => {
+      spindle.log.warn(
+        `[spotify_prompt_audio] Track preview verification failed for ${formatPromptAudioTrackLabel(state)}: ${err?.message || err}` +
+        `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+      );
+      return null;
+    });
+    if (previewVerification?.previewUrl) {
+      previewUrl = previewVerification.previewUrl;
+      spindle.log.info(
+        `[spotify_prompt_audio] Resolved preview URL for model ${model}: ` +
+        `${formatPromptAudioTrackLabel(state)} via /tracks/${previewVerification.trackId}` +
+        `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+      );
+    }
+  }
   if (!previewUrl) {
-    spindle.log.info(
-      `[spotify_prompt_audio] Skipped attachment for model ${model}: ` +
-      `${formatPromptAudioTrackLabel(state)} has no Spotify preview URL` +
-      `${context.chatId ? ` (chat ${context.chatId})` : ""}`
-    );
+    if (previewVerification?.verified && previewVerification.trackId) {
+      spindle.log.info(
+        `[spotify_prompt_audio] Verified no Spotify preview URL for model ${model}: ` +
+        `${formatPromptAudioTrackLabel(state)} returned null on both /me/player and /tracks/${previewVerification.trackId}` +
+        `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+      );
+    } else if (previewVerification?.trackId) {
+      spindle.log.info(
+        `[spotify_prompt_audio] Skipped attachment for model ${model}: ` +
+        `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and /tracks/${previewVerification.trackId} could not be verified ` +
+        `(status ${previewVerification.status ?? "unknown"})` +
+        `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+      );
+    } else if (state.trackUri) {
+      spindle.log.info(
+        `[spotify_prompt_audio] Skipped attachment for model ${model}: ` +
+        `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and ${state.trackUri} is not a Spotify track URI` +
+        `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+      );
+    } else {
+      spindle.log.info(
+        `[spotify_prompt_audio] Skipped attachment for model ${model}: ` +
+        `${formatPromptAudioTrackLabel(state)} has no Spotify preview URL` +
+        `${context.chatId ? ` (chat ${context.chatId})` : ""}`
+      );
+    }
     return sanitizedMessages;
   }
 

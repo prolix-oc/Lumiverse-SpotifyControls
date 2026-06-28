@@ -136,6 +136,39 @@ async function getCurrentPlayback(userId) {
     return null;
   return parsePlaybackState(JSON.parse(res.body));
 }
+function parsePreviewUrl(track) {
+  return typeof track?.preview_url === "string" ? track.preview_url : typeof track?.audio_preview_url === "string" ? track.audio_preview_url : null;
+}
+function parseTrackIdFromUri(trackUri) {
+  const match = /^spotify:track:([A-Za-z0-9]+)$/.exec(trackUri.trim());
+  return match?.[1] ?? null;
+}
+async function verifyTrackPreviewUrl(trackUri, userId) {
+  const trackId = parseTrackIdFromUri(trackUri);
+  if (!trackId) {
+    return {
+      trackId: null,
+      previewUrl: null,
+      verified: false,
+      status: null
+    };
+  }
+  const res = await spotifyFetch(`/tracks/${encodeURIComponent(trackId)}`, {}, userId);
+  if (res.status !== 200 || !res.body || res.body.trim() === "") {
+    return {
+      trackId,
+      previewUrl: null,
+      verified: false,
+      status: res.status
+    };
+  }
+  return {
+    trackId,
+    previewUrl: parsePreviewUrl(JSON.parse(res.body)),
+    verified: true,
+    status: res.status
+  };
+}
 function parsePlaybackState(data) {
   if (!data?.item)
     return null;
@@ -146,7 +179,7 @@ function parsePlaybackState(data) {
     artistName: (data.item.artists || []).map((a) => a.name).join(", "),
     albumName: data.item.album?.name || "",
     albumArtUrl: images.length > 0 ? images[images.length > 1 ? 1 : 0].url : null,
-    previewUrl: typeof data.item.preview_url === "string" ? data.item.preview_url : typeof data.item.audio_preview_url === "string" ? data.item.audio_preview_url : null,
+    previewUrl: parsePreviewUrl(data.item),
     progressMs: data.progress_ms || 0,
     durationMs: data.item.duration_ms || 0,
     shuffleState: data.shuffle_state || false,
@@ -1464,9 +1497,28 @@ async function maybeAttachSpotifyPreviewAudio(messages, rawContext) {
     spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: no active playback state` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
     return sanitizedMessages;
   }
-  const previewUrl = state?.previewUrl;
+  let previewUrl = state.previewUrl;
+  let previewVerification = null;
+  if (!previewUrl && state.trackUri) {
+    previewVerification = await verifyTrackPreviewUrl(state.trackUri, spotifyUserId).catch((err) => {
+      spindle.log.warn(`[spotify_prompt_audio] Track preview verification failed for ${formatPromptAudioTrackLabel(state)}: ${err?.message || err}` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+      return null;
+    });
+    if (previewVerification?.previewUrl) {
+      previewUrl = previewVerification.previewUrl;
+      spindle.log.info(`[spotify_prompt_audio] Resolved preview URL for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} via /tracks/${previewVerification.trackId}` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+    }
+  }
   if (!previewUrl) {
-    spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no Spotify preview URL` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+    if (previewVerification?.verified && previewVerification.trackId) {
+      spindle.log.info(`[spotify_prompt_audio] Verified no Spotify preview URL for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} returned null on both /me/player and /tracks/${previewVerification.trackId}` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+    } else if (previewVerification?.trackId) {
+      spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and /tracks/${previewVerification.trackId} could not be verified ` + `(status ${previewVerification.status ?? "unknown"})` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+    } else if (state.trackUri) {
+      spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no preview URL on /me/player, and ${state.trackUri} is not a Spotify track URI` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+    } else {
+      spindle.log.info(`[spotify_prompt_audio] Skipped attachment for model ${model}: ` + `${formatPromptAudioTrackLabel(state)} has no Spotify preview URL` + `${context.chatId ? ` (chat ${context.chatId})` : ""}`);
+    }
     return sanitizedMessages;
   }
   const previewAudio = await getPreviewAudioPayload(previewUrl);
