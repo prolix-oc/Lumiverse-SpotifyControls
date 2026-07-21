@@ -6341,6 +6341,11 @@ function setup(ctx) {
   sendToBackend({ type: "get_config" });
   sendToBackend({ type: "get_state" });
   sendToBackend({ type: "get_widget_prefs" });
+  const retryTimer = setTimeout(() => {
+    sendToBackend({ type: "get_config" });
+    sendToBackend({ type: "get_state" });
+  }, 2000);
+  cleanups.push(() => clearTimeout(retryTimer));
   readyGate.release();
   return () => {
     readyGate.dispose();

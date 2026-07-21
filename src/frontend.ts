@@ -1305,6 +1305,16 @@ export function setup(ctx: SpindleFrontendContext) {
   sendToBackend({ type: "get_config" });
   sendToBackend({ type: "get_state" });
   sendToBackend({ type: "get_widget_prefs" });
+
+  // Retry initial requests after a short delay to handle the case where the
+  // backend wasn't fully initialized when the first requests were sent
+  // (e.g. after an extension restart).
+  const retryTimer = setTimeout(() => {
+    sendToBackend({ type: "get_config" });
+    sendToBackend({ type: "get_state" });
+  }, 2000);
+  cleanups.push(() => clearTimeout(retryTimer));
+
   readyGate.release();
 
   // ─── Teardown ────────────────────────────────────────────────────────

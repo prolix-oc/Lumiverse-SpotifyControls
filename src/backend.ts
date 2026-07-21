@@ -615,16 +615,29 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
 
       case "get_config": {
-        const config = await loadConfig(userId);
-        send({
-          type: "config",
-          clientId: config.clientId,
-          hasSecret: !!config.clientSecret,
-          connected: spotify.isConnected(userId),
-          callbackUrl: spindle.oauth.getCallbackUrl(),
-          hasLastfmKey: !!config.lastfmApiKey,
-          promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled,
-        }, userId);
+        try {
+          const config = await loadConfig(userId);
+          send({
+            type: "config",
+            clientId: config.clientId,
+            hasSecret: !!config.clientSecret,
+            connected: spotify.isConnected(userId),
+            callbackUrl: spindle.oauth.getCallbackUrl(),
+            hasLastfmKey: !!config.lastfmApiKey,
+            promptAudioPreviewEnabled: !!config.promptAudioPreviewEnabled,
+          }, userId);
+        } catch (err: any) {
+          spindle.log.warn(`get_config failed: ${err?.message}`);
+          send({
+            type: "config",
+            clientId: "",
+            hasSecret: false,
+            connected: false,
+            callbackUrl: spindle.oauth.getCallbackUrl(),
+            hasLastfmKey: false,
+            promptAudioPreviewEnabled: false,
+          }, userId);
+        }
         break;
       }
 
