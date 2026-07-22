@@ -6044,6 +6044,7 @@ function setup(ctx) {
     modernWidgetExpanded = false;
     modernWidget.setExpanded(false);
     const pos = widget.getPosition();
+    lastKnownPos = pos;
     widget.destroy();
     currentWidgetSize = clampWidgetSize(newSize, currentMiniPlayerStyle);
     updateWidgetCustomizationUI();

@@ -932,6 +932,9 @@ export function setup(ctx: SpindleFrontendContext) {
     modernWidgetExpanded = false;
     modernWidget.setExpanded(false);
     const pos = widget.getPosition();
+    // `saveWidgetPrefs` runs below after the old widget is disposed. Keep its
+    // final position so it never has to read from a destroyed float widget.
+    lastKnownPos = pos;
     widget.destroy();
 
     currentWidgetSize = clampWidgetSize(newSize, currentMiniPlayerStyle);
