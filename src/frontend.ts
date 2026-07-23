@@ -609,6 +609,8 @@ export function setup(ctx: SpindleFrontendContext) {
 
   let modernWidgetExpanded = false;
   const WIDGET_EDGE_PAD = 12;
+  const WIDGET_SIZE_TRANSITION_MS = 420;
+  let widgetSizeRequestTimer: ReturnType<typeof setTimeout> | null = null;
   const modernWidget = createModernWidgetPlayerUI(
     sendToBackend,
     () => tab.activate(),
@@ -641,21 +643,34 @@ export function setup(ctx: SpindleFrontendContext) {
   }
 
   function setModernWidgetExpanded(expanded: boolean) {
+    const wasExpanded = modernWidgetExpanded;
     modernWidgetExpanded = expanded && currentMiniPlayerStyle === "modern";
     miniPlayer.hide();
     clampWidgetPosition(getWidgetLayoutSize(modernWidgetExpanded));
     modernWidget.setExpanded(modernWidgetExpanded);
-    applyWidgetStyle();
+    applyWidgetStyle({ delaySizeRequest: wasExpanded && !modernWidgetExpanded });
     requestAnimationFrame(() => clampWidgetPosition(getWidgetLayoutSize()));
   }
 
-  function applyWidgetStyle() {
+  function requestWidgetSize(size: { width: number; height: number }, delay = false) {
+    if (widgetSizeRequestTimer) {
+      clearTimeout(widgetSizeRequestTimer);
+      widgetSizeRequestTimer = null;
+    }
+    const commit = () => {
+      widgetSizeRequestTimer = null;
+      widget.setSize(size.width, size.height);
+    };
+    if (delay) {
+      widgetSizeRequestTimer = setTimeout(commit, WIDGET_SIZE_TRANSITION_MS);
+    } else {
+      commit();
+    }
+  }
+
+  function applyWidgetStyle({ delaySizeRequest = false }: { delaySizeRequest?: boolean } = {}) {
     const touchAction = currentMiniPlayerStyle === "modern" && modernWidgetExpanded ? "pan-y" : "none";
     const size = getWidgetLayoutSize();
-    // Keep Spindle's placement bounds in sync with the visual CSS layout.
-    // This is also the signal the Tauri pop-out uses to resize its native
-    // window when the modern player expands or collapses.
-    widget.setSize(size.width, size.height);
     widget.root.style.touchAction = touchAction;
     widget.root.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
@@ -671,6 +686,10 @@ export function setup(ctx: SpindleFrontendContext) {
       widgetContent.style.width = `${size.width}px`;
       widgetContent.style.height = `${size.height}px`;
       widgetContent.style.borderRadius = modernWidgetExpanded ? "30px" : `${Math.max(18, Math.round(currentWidgetSize * 0.28))}px`;
+      // Keep Spindle's placement bounds in sync with the visual CSS layout.
+      // On collapse, keep the native/browser container at its expanded size
+      // until the CSS transition has finished, then commit the compact size.
+      requestWidgetSize(size, delaySizeRequest);
       return;
     }
 
@@ -690,8 +709,12 @@ export function setup(ctx: SpindleFrontendContext) {
       (iconSvg as SVGElement).style.width = `${iconSize}px`;
       (iconSvg as SVGElement).style.height = `${iconSize}px`;
     }
+    requestWidgetSize(size);
   }
   applyWidgetStyle();
+  cleanups.push(() => {
+    if (widgetSizeRequestTimer) clearTimeout(widgetSizeRequestTimer);
+  });
   widget.onDragEnd((pos) => debounceSavePosition(pos));
   if (savedX !== undefined && savedY !== undefined) {
     widget.moveTo(savedX, savedY);

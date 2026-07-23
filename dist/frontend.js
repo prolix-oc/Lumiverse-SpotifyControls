@@ -5773,6 +5773,8 @@ function setup(ctx) {
   widgetContent.appendChild(legacyWidgetVisual);
   let modernWidgetExpanded = false;
   const WIDGET_EDGE_PAD = 12;
+  const WIDGET_SIZE_TRANSITION_MS = 420;
+  let widgetSizeRequestTimer = null;
   const modernWidget = createModernWidgetPlayerUI(sendToBackend, () => tab.activate(), () => setModernWidgetExpanded(false));
   widgetContent.appendChild(modernWidget.root);
   widget.root.appendChild(widgetContent);
@@ -5796,17 +5798,32 @@ function setup(ctx) {
     return { width: currentWidgetSize, height: currentWidgetSize };
   }
   function setModernWidgetExpanded(expanded) {
+    const wasExpanded = modernWidgetExpanded;
     modernWidgetExpanded = expanded && currentMiniPlayerStyle === "modern";
     miniPlayer.hide();
     clampWidgetPosition(getWidgetLayoutSize(modernWidgetExpanded));
     modernWidget.setExpanded(modernWidgetExpanded);
-    applyWidgetStyle();
+    applyWidgetStyle({ delaySizeRequest: wasExpanded && !modernWidgetExpanded });
     requestAnimationFrame(() => clampWidgetPosition(getWidgetLayoutSize()));
   }
-  function applyWidgetStyle() {
+  function requestWidgetSize(size, delay = false) {
+    if (widgetSizeRequestTimer) {
+      clearTimeout(widgetSizeRequestTimer);
+      widgetSizeRequestTimer = null;
+    }
+    const commit = () => {
+      widgetSizeRequestTimer = null;
+      widget.setSize(size.width, size.height);
+    };
+    if (delay) {
+      widgetSizeRequestTimer = setTimeout(commit, WIDGET_SIZE_TRANSITION_MS);
+    } else {
+      commit();
+    }
+  }
+  function applyWidgetStyle({ delaySizeRequest = false } = {}) {
     const touchAction = currentMiniPlayerStyle === "modern" && modernWidgetExpanded ? "pan-y" : "none";
     const size = getWidgetLayoutSize();
-    widget.setSize(size.width, size.height);
     widget.root.style.touchAction = touchAction;
     widget.root.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
@@ -5821,6 +5838,7 @@ function setup(ctx) {
       widgetContent.style.width = `${size.width}px`;
       widgetContent.style.height = `${size.height}px`;
       widgetContent.style.borderRadius = modernWidgetExpanded ? "30px" : `${Math.max(18, Math.round(currentWidgetSize * 0.28))}px`;
+      requestWidgetSize(size, delaySizeRequest);
       return;
     }
     widgetContent.classList.remove("spotify-float-widget-modern-mode");
@@ -5838,8 +5856,13 @@ function setup(ctx) {
       iconSvg.style.width = `${iconSize}px`;
       iconSvg.style.height = `${iconSize}px`;
     }
+    requestWidgetSize(size);
   }
   applyWidgetStyle();
+  cleanups.push(() => {
+    if (widgetSizeRequestTimer)
+      clearTimeout(widgetSizeRequestTimer);
+  });
   widget.onDragEnd((pos) => debounceSavePosition(pos));
   if (savedX !== undefined && savedY !== undefined) {
     widget.moveTo(savedX, savedY);
