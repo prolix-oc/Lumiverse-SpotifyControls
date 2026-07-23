@@ -330,6 +330,8 @@ export function setup(ctx: SpindleFrontendContext) {
   let lastThemeArtUrl: string | null = null;
   let themeApplySeq = 0;
   let pendingThemeClearTimer: ReturnType<typeof setTimeout> | null = null;
+  const albumPaletteCache = new Map<string, AlbumColors>();
+  const ALBUM_PALETTE_CACHE_LIMIT = 48;
 
   function cancelPendingThemeClear() {
     if (pendingThemeClearTimer) {
@@ -342,6 +344,16 @@ export function setup(ctx: SpindleFrontendContext) {
     cancelPendingThemeClear();
     themeApplySeq += 1;
     sendToBackend({ type: "album_colors", colors: null });
+  }
+
+  function rememberAlbumPalette(artworkKey: string, colors: AlbumColors) {
+    albumPaletteCache.delete(artworkKey);
+    albumPaletteCache.set(artworkKey, colors);
+    while (albumPaletteCache.size > ALBUM_PALETTE_CACHE_LIMIT) {
+      const oldestKey = albumPaletteCache.keys().next().value;
+      if (!oldestKey) break;
+      albumPaletteCache.delete(oldestKey);
+    }
   }
 
   // Spotify can briefly report no active playback while transitioning between
@@ -629,12 +641,10 @@ export function setup(ctx: SpindleFrontendContext) {
     }
 
     return {
-      // A freshly opened desktop pop-out still reports the compact window's
-      // viewport during this calculation. Keep an intentional expanded
-      // baseline so the player has room for about four lyric lines before
-      // the native host applies the requested bounds.
-      width: Math.max(320, Math.min(368, window.innerWidth - 24)),
-      height: Math.max(500, Math.min(600, window.innerHeight - 24)),
+      // Keep the modern player compact enough for the original floating-widget
+      // footprint while still leaving room for the lyric animation viewport.
+      width: Math.max(300, Math.min(348, window.innerWidth - 24)),
+      height: Math.max(420, Math.min(520, window.innerHeight - 24)),
     };
   }
 
@@ -1110,19 +1120,30 @@ export function setup(ctx: SpindleFrontendContext) {
         scheduleTrackEndRefresh(currentState);
         // Extract album art colors for theme when art changes
         const artUrl = getTrackScopedArtUrl(currentState?.albumArtUrl ?? null, currentState?.trackUri);
+        const artworkKey = currentState?.albumArtKey || artUrl;
         if (artUrl !== lastThemeArtUrl) {
           lastThemeArtUrl = artUrl;
           if (artUrl) {
             cancelPendingThemeClear();
-            const applySeq = ++themeApplySeq;
-            extractColorsFromImage(artUrl).then((colors) => {
-              if (applySeq !== themeApplySeq || artUrl !== lastThemeArtUrl) return;
-              if (colors) {
-                sendToBackend({ type: "album_colors", colors });
-              } else if (!connected) {
-                clearAlbumTheme();
-              }
-            });
+            const restoredFromBackend = artworkKey && msg.albumPalette?.artworkKey === artworkKey;
+            const restoredPalette = restoredFromBackend
+              ? msg.albumPalette!.colors
+              : albumPaletteCache.get(artworkKey || "");
+            if (artworkKey && restoredPalette) {
+              rememberAlbumPalette(artworkKey, restoredPalette);
+              if (!restoredFromBackend) sendToBackend({ type: "album_colors", colors: restoredPalette, artworkKey });
+            } else {
+              const applySeq = ++themeApplySeq;
+              extractColorsFromImage(artUrl).then((colors) => {
+                if (applySeq !== themeApplySeq || artUrl !== lastThemeArtUrl) return;
+                if (colors) {
+                  if (artworkKey) rememberAlbumPalette(artworkKey, colors);
+                  sendToBackend({ type: "album_colors", colors, artworkKey });
+                } else if (!connected) {
+                  clearAlbumTheme();
+                }
+              });
+            }
           } else {
             if (connected) scheduleAlbumThemeClear();
             else clearAlbumTheme();
@@ -1222,6 +1243,7 @@ export function setup(ctx: SpindleFrontendContext) {
       }
 
       case "connected":
+        albumPaletteCache.clear();
         connected = true;
         syncWidgetVisibility();
         sendToBackend({ type: "get_config" });
@@ -1229,6 +1251,7 @@ export function setup(ctx: SpindleFrontendContext) {
         break;
 
       case "disconnected":
+        albumPaletteCache.clear();
         pendingSeekCommit = null;
         pendingVolumeCommit = null;
         pendingTrackSkip = null;
@@ -1305,6 +1328,7 @@ export function setup(ctx: SpindleFrontendContext) {
     } else {
       currentState = null;
       connected = false;
+      albumPaletteCache.clear();
       syncWidgetVisibility();
       clearAlbumTheme();
       nowPlayingUI.update(null, false);

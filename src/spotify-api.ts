@@ -323,6 +323,7 @@ function parsePlaybackState(data: any): PlaybackState | null {
     repeatState: data.repeat_state || "off",
     volume: data.device?.volume_percent ?? null,
     trackUri: data.item.uri || "",
+    albumArtKey: data.item.album?.id || null,
     deviceName: data.device?.name || null,
     deviceType: data.device?.type || null,
     deviceId: data.device?.id || null,

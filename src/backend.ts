@@ -5,7 +5,7 @@ import type { InterceptorResultDTO, LlmMessageDTO } from "lumiverse-spindle-type
 // lumiverse-spindle-types exports LlmMessageDTO but not its part union; derive
 // the part type from the array branch of LlmMessageDTO.content.
 type LlmMessagePartDTO = Extract<LlmMessageDTO["content"], unknown[]>[number];
-import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, MiniPlayerStyle, PlaybackState, SongSnapshot, MessageSongEntry } from "./types";
+import type { FrontendToBackend, BackendToFrontend, SpotifyConfig, WidgetPrefs, SearchResult, AlbumColors, AlbumPalette, MiniPlayerStyle, PlaybackState, SongSnapshot, MessageSongEntry } from "./types";
 import * as spotify from "./spotify-api";
 import {
   createLyricsRequestCoordinator,
@@ -33,6 +33,8 @@ type UserSession = {
   lastState: PlaybackState | null;
   lastStateUpdatedAt: number;
   lyricsRequests: LyricsRequestCoordinator<spotify.LyricsData>;
+  albumPaletteCache: { clientId: string; entries: Record<string, AlbumColors> } | null;
+  activeAlbumPaletteKey: string | null;
   initialized: boolean;
 };
 
@@ -40,6 +42,8 @@ const sessions = new Map<string, UserSession>();
 const pendingOAuthByState = new Map<string, PendingOAuth>();
 const chatOwnerById = new Map<string, string>();
 const LYRICS_CACHE_ENTRIES = 24;
+const ALBUM_PALETTE_CACHE_STORAGE_KEY = "album-palette-cache.json";
+const ALBUM_PALETTE_CACHE_LIMIT = 48;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -75,6 +79,8 @@ function getSession(userId: string): UserSession {
         ),
         LYRICS_CACHE_ENTRIES,
       ),
+      albumPaletteCache: null,
+      activeAlbumPaletteKey: null,
       initialized: false,
     };
     sessions.set(userId, session);
@@ -105,6 +111,70 @@ async function loadConfig(userId?: string): Promise<SpotifyConfig> {
     lastfmApiKey: lastfmApiKey || undefined,
     promptAudioPreviewEnabled: !!stored.promptAudioPreviewEnabled,
   };
+}
+
+function isAlbumColors(value: unknown): value is AlbumColors {
+  if (!value || typeof value !== "object") return false;
+  const colors = value as AlbumColors;
+  return [
+    colors.dominant?.r, colors.dominant?.g, colors.dominant?.b,
+    colors.dominantHsl?.h, colors.dominantHsl?.s, colors.dominantHsl?.l,
+  ].every((component) => typeof component === "number" && Number.isFinite(component))
+    && typeof colors.isLight === "boolean";
+}
+
+async function getAlbumPaletteCache(userId: string): Promise<{ clientId: string; entries: Record<string, AlbumColors> }> {
+  const session = getSession(userId);
+  if (session.albumPaletteCache) return session.albumPaletteCache;
+
+  const config = await loadConfig(userId);
+  const stored = await spindle.userStorage.getJson(ALBUM_PALETTE_CACHE_STORAGE_KEY, {
+    fallback: { clientId: "", entries: {} },
+    userId,
+  }) as { clientId?: unknown; entries?: unknown };
+  const entries: Record<string, AlbumColors> = {};
+  if (stored.clientId === config.clientId && stored.entries && typeof stored.entries === "object") {
+    for (const [artworkKey, colors] of Object.entries(stored.entries)) {
+      if (isAlbumColors(colors)) entries[artworkKey] = colors;
+    }
+  }
+  const cache = { clientId: config.clientId, entries };
+  session.albumPaletteCache = cache;
+  return cache;
+}
+
+async function saveAlbumPalette(userId: string, artworkKey: string, colors: AlbumColors): Promise<void> {
+  const cache = await getAlbumPaletteCache(userId);
+  delete cache.entries[artworkKey];
+  cache.entries[artworkKey] = colors;
+  while (Object.keys(cache.entries).length > ALBUM_PALETTE_CACHE_LIMIT) {
+    const oldestKey = Object.keys(cache.entries)[0];
+    delete cache.entries[oldestKey];
+  }
+  await spindle.userStorage.setJson(ALBUM_PALETTE_CACHE_STORAGE_KEY, cache, { userId });
+}
+
+async function restoreAlbumPalette(userId: string, state: PlaybackState | null): Promise<AlbumPalette | null> {
+  const artworkKey = state?.albumArtKey;
+  if (!artworkKey) return null;
+  const colors = (await getAlbumPaletteCache(userId)).entries[artworkKey];
+  if (!colors) return null;
+
+  const session = getSession(userId);
+  if (session.activeAlbumPaletteKey !== artworkKey) {
+    try {
+      await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
+      session.activeAlbumPaletteKey = artworkKey;
+    } catch (err: any) {
+      spindle.log.warn(`Album theme restore: ${err?.message || err}`);
+    }
+  }
+  return { artworkKey, colors };
+}
+
+async function sendPlaybackState(userId: string, playbackState: PlaybackState | null, connected: boolean): Promise<void> {
+  const albumPalette = connected ? await restoreAlbumPalette(userId, playbackState) : null;
+  send({ type: "state", playbackState, connected, albumPalette }, userId);
 }
 
 async function saveConfig(config: SpotifyConfig, userId?: string): Promise<void> {
@@ -420,7 +490,7 @@ function scheduleNextPoll(userId: string) {
         session.nullStateRetries = 0;
       }
       await cacheState(userId, state);
-      send({ type: "state", playbackState: state, connected: true }, userId);
+      await sendPlaybackState(userId, state, true);
 
       // If the track changed externally, do a quick follow-up fetch so the
       // frontend gets the most settled state (progress, duration, etc.)
@@ -430,7 +500,7 @@ function scheduleNextPoll(userId: string) {
             const fresh = await spotify.getCurrentPlayback(userId);
             if (fresh) {
               await cacheState(userId, fresh);
-              send({ type: "state", playbackState: fresh, connected: true }, userId);
+              await sendPlaybackState(userId, fresh, true);
             }
           } catch {}
         }, 1200);
@@ -456,7 +526,7 @@ async function pushStateUpdate(userId: string): Promise<PlaybackState | null> {
   try {
     const state = await spotify.getCurrentPlayback(userId);
     await cacheState(userId, state);
-    send({ type: "state", playbackState: state, connected: true }, userId);
+    await sendPlaybackState(userId, state, true);
     return state;
   } catch {
     return null;
@@ -606,11 +676,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
           ? await spotify.getCurrentPlayback(userId)
           : null;
         await cacheState(userId, playbackState);
-        send({
-          type: "state",
-          playbackState,
-          connected: spotify.isConnected(userId),
-        }, userId);
+        await sendPlaybackState(userId, playbackState, spotify.isConnected(userId));
         break;
       }
 
@@ -650,6 +716,9 @@ spindle.onFrontendMessage(async (raw, userId) => {
           lastfmApiKey: existing.lastfmApiKey,
           promptAudioPreviewEnabled: existing.promptAudioPreviewEnabled,
         }, userId);
+        const session = getSession(userId);
+        session.albumPaletteCache = null;
+        session.activeAlbumPaletteKey = null;
 
         const state = await spindle.oauth.createState();
         const codeVerifier = createCodeVerifier();
@@ -686,6 +755,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         await spotify.clearTokens(userId);
         await (spindle.theme as typeof spindle.theme & { clear(targetUserId?: string): Promise<void> }).clear(userId).catch(() => {});
         const session = getSession(userId);
+        session.activeAlbumPaletteKey = null;
         session.lyricsRequests.clear();
         await cacheState(userId, null);
         if (activeUserId === userId) {
@@ -817,7 +887,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       }
 
       case "album_colors": {
-        await applyAlbumTheme(msg.colors, userId);
+        await applyAlbumTheme(msg.colors, userId, msg.artworkKey);
         break;
       }
 
@@ -884,7 +954,7 @@ async function sendLyricsForCurrentTrack(userId: string): Promise<void> {
 
 // ─── Album theme ────────────────────────────────────────────────────────
 
-async function applyAlbumTheme(colors: AlbumColors | null, userId?: string): Promise<void> {
+async function applyAlbumTheme(colors: AlbumColors | null, userId?: string, artworkKey?: string | null): Promise<void> {
   try {
     const themeApi = spindle.theme as typeof spindle.theme & {
       clear(targetUserId?: string): Promise<void>;
@@ -892,6 +962,19 @@ async function applyAlbumTheme(colors: AlbumColors | null, userId?: string): Pro
 
     if (!colors) {
       await themeApi.clear(userId);
+      if (userId) getSession(userId).activeAlbumPaletteKey = null;
+      return;
+    }
+    const currentArtworkKey = userId ? getSession(userId).lastState?.albumArtKey : null;
+    // Do not allow a slow extraction for the previous track to replace the
+    // palette after Spotify has already advanced playback.
+    if (artworkKey && currentArtworkKey && artworkKey !== currentArtworkKey) return;
+    if (userId && artworkKey) {
+      await saveAlbumPalette(userId, artworkKey, colors);
+      const session = getSession(userId);
+      if (session.activeAlbumPaletteKey === artworkKey) return;
+      await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
+      session.activeAlbumPaletteKey = artworkKey;
       return;
     }
     // Let Lumiverse own the final presentation layer (glass/alpha/shadows/

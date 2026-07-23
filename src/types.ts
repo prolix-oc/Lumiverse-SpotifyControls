@@ -23,13 +23,13 @@ export type FrontendToBackend =
   | { type: "get_widget_prefs" }
   | { type: "save_widget_prefs"; prefs: WidgetPrefs }
   | { type: "get_lyrics" }
-  | { type: "album_colors"; colors: AlbumColors | null }
+  | { type: "album_colors"; colors: AlbumColors | null; artworkKey?: string | null }
   | { type: "get_chat_songs"; chatId: string };
 
 // ─── Backend → Frontend messages ─────────────────────────────────────────
 
 export type BackendToFrontend =
-  | { type: "state"; playbackState: PlaybackState | null; connected: boolean }
+  | { type: "state"; playbackState: PlaybackState | null; connected: boolean; albumPalette?: AlbumPalette | null }
   | {
     type: "config";
     clientId: string;
@@ -65,6 +65,8 @@ export interface PlaybackState {
   repeatState: "off" | "context" | "track";
   volume: number | null;
   trackUri: string;
+  /** Stable Spotify album identifier, used to reuse an album palette. */
+  albumArtKey?: string | null;
   deviceName: string | null;
   deviceType: string | null;
   deviceId: string | null;
@@ -141,6 +143,11 @@ export interface AlbumColors {
   dominant: { r: number; g: number; b: number };
   dominantHsl: { h: number; s: number; l: number };
   isLight: boolean;
+}
+
+export interface AlbumPalette {
+  artworkKey: string;
+  colors: AlbumColors;
 }
 
 export interface SpotifyConfig {

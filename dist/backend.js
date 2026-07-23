@@ -233,6 +233,7 @@ function parsePlaybackState(data) {
     repeatState: data.repeat_state || "off",
     volume: data.device?.volume_percent ?? null,
     trackUri: data.item.uri || "",
+    albumArtKey: data.item.album?.id || null,
     deviceName: data.device?.name || null,
     deviceType: data.device?.type || null,
     deviceId: data.device?.id || null
@@ -557,6 +558,8 @@ var sessions = new Map;
 var pendingOAuthByState = new Map;
 var chatOwnerById = new Map;
 var LYRICS_CACHE_ENTRIES = 24;
+var ALBUM_PALETTE_CACHE_STORAGE_KEY = "album-palette-cache.json";
+var ALBUM_PALETTE_CACHE_LIMIT = 48;
 function send(msg, userId) {
   spindle.sendToFrontend(msg, userId);
 }
@@ -580,6 +583,8 @@ function getSession(userId) {
       lastState: null,
       lastStateUpdatedAt: 0,
       lyricsRequests: createLyricsRequestCoordinator((track) => getLyrics(track.trackName, track.artistName, track.albumName, track.durationMs / 1000, userId), LYRICS_CACHE_ENTRIES),
+      albumPaletteCache: null,
+      activeAlbumPaletteKey: null,
       initialized: false
     };
     sessions.set(userId, session);
@@ -608,6 +613,71 @@ async function loadConfig(userId) {
     lastfmApiKey: lastfmApiKey || undefined,
     promptAudioPreviewEnabled: !!stored.promptAudioPreviewEnabled
   };
+}
+function isAlbumColors(value) {
+  if (!value || typeof value !== "object")
+    return false;
+  const colors = value;
+  return [
+    colors.dominant?.r,
+    colors.dominant?.g,
+    colors.dominant?.b,
+    colors.dominantHsl?.h,
+    colors.dominantHsl?.s,
+    colors.dominantHsl?.l
+  ].every((component) => typeof component === "number" && Number.isFinite(component)) && typeof colors.isLight === "boolean";
+}
+async function getAlbumPaletteCache(userId) {
+  const session = getSession(userId);
+  if (session.albumPaletteCache)
+    return session.albumPaletteCache;
+  const config = await loadConfig(userId);
+  const stored = await spindle.userStorage.getJson(ALBUM_PALETTE_CACHE_STORAGE_KEY, {
+    fallback: { clientId: "", entries: {} },
+    userId
+  });
+  const entries = {};
+  if (stored.clientId === config.clientId && stored.entries && typeof stored.entries === "object") {
+    for (const [artworkKey, colors] of Object.entries(stored.entries)) {
+      if (isAlbumColors(colors))
+        entries[artworkKey] = colors;
+    }
+  }
+  const cache = { clientId: config.clientId, entries };
+  session.albumPaletteCache = cache;
+  return cache;
+}
+async function saveAlbumPalette(userId, artworkKey, colors) {
+  const cache = await getAlbumPaletteCache(userId);
+  delete cache.entries[artworkKey];
+  cache.entries[artworkKey] = colors;
+  while (Object.keys(cache.entries).length > ALBUM_PALETTE_CACHE_LIMIT) {
+    const oldestKey = Object.keys(cache.entries)[0];
+    delete cache.entries[oldestKey];
+  }
+  await spindle.userStorage.setJson(ALBUM_PALETTE_CACHE_STORAGE_KEY, cache, { userId });
+}
+async function restoreAlbumPalette(userId, state) {
+  const artworkKey = state?.albumArtKey;
+  if (!artworkKey)
+    return null;
+  const colors = (await getAlbumPaletteCache(userId)).entries[artworkKey];
+  if (!colors)
+    return null;
+  const session = getSession(userId);
+  if (session.activeAlbumPaletteKey !== artworkKey) {
+    try {
+      await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
+      session.activeAlbumPaletteKey = artworkKey;
+    } catch (err) {
+      spindle.log.warn(`Album theme restore: ${err?.message || err}`);
+    }
+  }
+  return { artworkKey, colors };
+}
+async function sendPlaybackState(userId, playbackState, connected) {
+  const albumPalette = connected ? await restoreAlbumPalette(userId, playbackState) : null;
+  send({ type: "state", playbackState, connected, albumPalette }, userId);
 }
 async function saveConfig(config, userId) {
   await spindle.userStorage.setJson("config.json", {
@@ -869,14 +939,14 @@ function scheduleNextPoll(userId) {
         session.nullStateRetries = 0;
       }
       await cacheState(userId, state);
-      send({ type: "state", playbackState: state, connected: true }, userId);
+      await sendPlaybackState(userId, state, true);
       if (state && previousUri && state.trackUri !== previousUri) {
         setTimeout(async () => {
           try {
             const fresh = await getCurrentPlayback(userId);
             if (fresh) {
               await cacheState(userId, fresh);
-              send({ type: "state", playbackState: fresh, connected: true }, userId);
+              await sendPlaybackState(userId, fresh, true);
             }
           } catch {}
         }, 1200);
@@ -899,7 +969,7 @@ async function pushStateUpdate(userId) {
   try {
     const state = await getCurrentPlayback(userId);
     await cacheState(userId, state);
-    send({ type: "state", playbackState: state, connected: true }, userId);
+    await sendPlaybackState(userId, state, true);
     return state;
   } catch {
     return null;
@@ -1016,11 +1086,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
       case "get_state": {
         const playbackState = isConnected(userId) ? await getCurrentPlayback(userId) : null;
         await cacheState(userId, playbackState);
-        send({
-          type: "state",
-          playbackState,
-          connected: isConnected(userId)
-        }, userId);
+        await sendPlaybackState(userId, playbackState, isConnected(userId));
         break;
       }
       case "get_config": {
@@ -1058,6 +1124,9 @@ spindle.onFrontendMessage(async (raw, userId) => {
           lastfmApiKey: existing.lastfmApiKey,
           promptAudioPreviewEnabled: existing.promptAudioPreviewEnabled
         }, userId);
+        const session = getSession(userId);
+        session.albumPaletteCache = null;
+        session.activeAlbumPaletteKey = null;
         const state = await spindle.oauth.createState();
         const codeVerifier = createCodeVerifier();
         const codeChallenge = await createCodeChallenge(codeVerifier);
@@ -1088,6 +1157,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         await clearTokens(userId);
         await spindle.theme.clear(userId).catch(() => {});
         const session = getSession(userId);
+        session.activeAlbumPaletteKey = null;
         session.lyricsRequests.clear();
         await cacheState(userId, null);
         if (activeUserId2 === userId) {
@@ -1202,7 +1272,7 @@ spindle.onFrontendMessage(async (raw, userId) => {
         break;
       }
       case "album_colors": {
-        await applyAlbumTheme(msg.colors, userId);
+        await applyAlbumTheme(msg.colors, userId, msg.artworkKey);
         break;
       }
       case "get_chat_songs": {
@@ -1261,11 +1331,25 @@ async function sendLyricsForCurrentTrack(userId) {
     }, userId);
   }
 }
-async function applyAlbumTheme(colors, userId) {
+async function applyAlbumTheme(colors, userId, artworkKey) {
   try {
     const themeApi = spindle.theme;
     if (!colors) {
       await themeApi.clear(userId);
+      if (userId)
+        getSession(userId).activeAlbumPaletteKey = null;
+      return;
+    }
+    const currentArtworkKey = userId ? getSession(userId).lastState?.albumArtKey : null;
+    if (artworkKey && currentArtworkKey && artworkKey !== currentArtworkKey)
+      return;
+    if (userId && artworkKey) {
+      await saveAlbumPalette(userId, artworkKey, colors);
+      const session = getSession(userId);
+      if (session.activeAlbumPaletteKey === artworkKey)
+        return;
+      await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
+      session.activeAlbumPaletteKey = artworkKey;
       return;
     }
     await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);

@@ -5537,6 +5537,8 @@ function setup(ctx) {
   let lastThemeArtUrl = null;
   let themeApplySeq = 0;
   let pendingThemeClearTimer = null;
+  const albumPaletteCache = new Map;
+  const ALBUM_PALETTE_CACHE_LIMIT = 48;
   function cancelPendingThemeClear() {
     if (pendingThemeClearTimer) {
       clearTimeout(pendingThemeClearTimer);
@@ -5547,6 +5549,16 @@ function setup(ctx) {
     cancelPendingThemeClear();
     themeApplySeq += 1;
     sendToBackend({ type: "album_colors", colors: null });
+  }
+  function rememberAlbumPalette(artworkKey, colors) {
+    albumPaletteCache.delete(artworkKey);
+    albumPaletteCache.set(artworkKey, colors);
+    while (albumPaletteCache.size > ALBUM_PALETTE_CACHE_LIMIT) {
+      const oldestKey = albumPaletteCache.keys().next().value;
+      if (!oldestKey)
+        break;
+      albumPaletteCache.delete(oldestKey);
+    }
   }
   function scheduleAlbumThemeClear(delayMs = 1800) {
     cancelPendingThemeClear();
@@ -5787,8 +5799,8 @@ function setup(ctx) {
       };
     }
     return {
-      width: Math.max(320, Math.min(368, window.innerWidth - 24)),
-      height: Math.max(500, Math.min(600, window.innerHeight - 24))
+      width: Math.max(300, Math.min(348, window.innerWidth - 24)),
+      height: Math.max(420, Math.min(520, window.innerHeight - 24))
     };
   }
   function getWidgetLayoutSize(expanded = modernWidgetExpanded) {
@@ -6183,20 +6195,31 @@ function setup(ctx) {
         }
         scheduleTrackEndRefresh(currentState);
         const artUrl = getTrackScopedArtUrl(currentState?.albumArtUrl ?? null, currentState?.trackUri);
+        const artworkKey = currentState?.albumArtKey || artUrl;
         if (artUrl !== lastThemeArtUrl) {
           lastThemeArtUrl = artUrl;
           if (artUrl) {
             cancelPendingThemeClear();
-            const applySeq = ++themeApplySeq;
-            extractColorsFromImage(artUrl).then((colors) => {
-              if (applySeq !== themeApplySeq || artUrl !== lastThemeArtUrl)
-                return;
-              if (colors) {
-                sendToBackend({ type: "album_colors", colors });
-              } else if (!connected) {
-                clearAlbumTheme();
-              }
-            });
+            const restoredFromBackend = artworkKey && msg.albumPalette?.artworkKey === artworkKey;
+            const restoredPalette = restoredFromBackend ? msg.albumPalette.colors : albumPaletteCache.get(artworkKey || "");
+            if (artworkKey && restoredPalette) {
+              rememberAlbumPalette(artworkKey, restoredPalette);
+              if (!restoredFromBackend)
+                sendToBackend({ type: "album_colors", colors: restoredPalette, artworkKey });
+            } else {
+              const applySeq = ++themeApplySeq;
+              extractColorsFromImage(artUrl).then((colors) => {
+                if (applySeq !== themeApplySeq || artUrl !== lastThemeArtUrl)
+                  return;
+                if (colors) {
+                  if (artworkKey)
+                    rememberAlbumPalette(artworkKey, colors);
+                  sendToBackend({ type: "album_colors", colors, artworkKey });
+                } else if (!connected) {
+                  clearAlbumTheme();
+                }
+              });
+            }
           } else {
             if (connected)
               scheduleAlbumThemeClear();
@@ -6274,12 +6297,14 @@ function setup(ctx) {
         break;
       }
       case "connected":
+        albumPaletteCache.clear();
         connected = true;
         syncWidgetVisibility();
         sendToBackend({ type: "get_config" });
         sendToBackend({ type: "get_state" });
         break;
       case "disconnected":
+        albumPaletteCache.clear();
         pendingSeekCommit = null;
         pendingVolumeCommit = null;
         pendingTrackSkip = null;
@@ -6339,6 +6364,7 @@ function setup(ctx) {
     } else {
       currentState = null;
       connected = false;
+      albumPaletteCache.clear();
       syncWidgetVisibility();
       clearAlbumTheme();
       nowPlayingUI.update(null, false);
