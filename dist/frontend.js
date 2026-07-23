@@ -5787,8 +5787,8 @@ function setup(ctx) {
       };
     }
     return {
-      width: Math.max(300, Math.min(348, window.innerWidth - 24)),
-      height: Math.max(420, Math.min(520, window.innerHeight - 24))
+      width: Math.max(320, Math.min(368, window.innerWidth - 24)),
+      height: Math.max(500, Math.min(600, window.innerHeight - 24))
     };
   }
   function getWidgetLayoutSize(expanded = modernWidgetExpanded) {

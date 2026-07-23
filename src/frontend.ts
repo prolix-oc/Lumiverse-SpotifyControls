@@ -629,8 +629,12 @@ export function setup(ctx: SpindleFrontendContext) {
     }
 
     return {
-      width: Math.max(300, Math.min(348, window.innerWidth - 24)),
-      height: Math.max(420, Math.min(520, window.innerHeight - 24)),
+      // A freshly opened desktop pop-out still reports the compact window's
+      // viewport during this calculation. Keep an intentional expanded
+      // baseline so the player has room for about four lyric lines before
+      // the native host applies the requested bounds.
+      width: Math.max(320, Math.min(368, window.innerWidth - 24)),
+      height: Math.max(500, Math.min(600, window.innerHeight - 24)),
     };
   }
 
