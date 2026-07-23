@@ -1278,6 +1278,18 @@ export function setup(ctx: SpindleFrontendContext) {
   });
   cleanups.push(msgUnsub);
 
+  // Desktop pop-outs run their own frontend instance. When the native window
+  // returns this page's widget root, refresh the page instance from the
+  // extension backend instead of waiting for the next polling broadcast.
+  const handleDesktopWidgetReturned = (event: Event) => {
+    const detail = (event as CustomEvent<{ extensionId?: unknown }>).detail;
+    if (detail?.extensionId !== ctx.manifest.identifier) return;
+    sendToBackend({ type: "get_config" });
+    sendToBackend({ type: "get_state" });
+  };
+  window.addEventListener("spindle:desktop-widget-returned", handleDesktopWidgetReturned);
+  cleanups.push(() => window.removeEventListener("spindle:desktop-widget-returned", handleDesktopWidgetReturned));
+
   // ─── Permission gate (real-time) ─────────────────────────────────────
   // SPINDLE_PERMISSION_CHANGED is broadcast on the event bus with an
   // extensionId — scope to our own identifier so we ignore other extensions.

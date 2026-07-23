@@ -6318,6 +6318,15 @@ function setup(ctx) {
     }
   });
   cleanups.push(msgUnsub);
+  const handleDesktopWidgetReturned = (event) => {
+    const detail = event.detail;
+    if (detail?.extensionId !== ctx.manifest.identifier)
+      return;
+    sendToBackend({ type: "get_config" });
+    sendToBackend({ type: "get_state" });
+  };
+  window.addEventListener("spindle:desktop-widget-returned", handleDesktopWidgetReturned);
+  cleanups.push(() => window.removeEventListener("spindle:desktop-widget-returned", handleDesktopWidgetReturned));
   const permUnsub = ctx.events.on("SPINDLE_PERMISSION_CHANGED", (payload) => {
     const detail = payload;
     if (detail.extensionId !== ctx.manifest.identifier)
