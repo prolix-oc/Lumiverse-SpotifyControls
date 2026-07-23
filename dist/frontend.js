@@ -5805,13 +5805,14 @@ function setup(ctx) {
   }
   function applyWidgetStyle() {
     const touchAction = currentMiniPlayerStyle === "modern" && modernWidgetExpanded ? "pan-y" : "none";
+    const size = getWidgetLayoutSize();
+    widget.setSize(size.width, size.height);
     widget.root.style.touchAction = touchAction;
     widget.root.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     widgetContent.style.touchAction = touchAction;
     modernWidget.setCollapsedSize(currentWidgetSize);
     if (currentMiniPlayerStyle === "modern") {
-      const size = getWidgetLayoutSize();
       widgetContent.classList.add("spotify-float-widget-modern-mode");
       legacyWidgetVisual.style.display = "none";
       modernWidget.root.style.display = "block";

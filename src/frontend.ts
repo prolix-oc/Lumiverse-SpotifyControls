@@ -651,6 +651,11 @@ export function setup(ctx: SpindleFrontendContext) {
 
   function applyWidgetStyle() {
     const touchAction = currentMiniPlayerStyle === "modern" && modernWidgetExpanded ? "pan-y" : "none";
+    const size = getWidgetLayoutSize();
+    // Keep Spindle's placement bounds in sync with the visual CSS layout.
+    // This is also the signal the Tauri pop-out uses to resize its native
+    // window when the modern player expands or collapses.
+    widget.setSize(size.width, size.height);
     widget.root.style.touchAction = touchAction;
     widget.root.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1)";
     widgetContent.style.transition = "width 420ms cubic-bezier(0.22, 1, 0.36, 1), height 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1)";
@@ -658,7 +663,6 @@ export function setup(ctx: SpindleFrontendContext) {
     modernWidget.setCollapsedSize(currentWidgetSize);
 
     if (currentMiniPlayerStyle === "modern") {
-      const size = getWidgetLayoutSize();
       widgetContent.classList.add("spotify-float-widget-modern-mode");
       legacyWidgetVisual.style.display = "none";
       modernWidget.root.style.display = "block";
