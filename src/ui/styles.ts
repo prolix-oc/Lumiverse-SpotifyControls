@@ -94,6 +94,23 @@ export const PANEL_CSS = `
   align-items: center;
 }
 
+.spotify-settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--lumiverse-text-muted);
+  cursor: pointer;
+}
+
+.spotify-settings-check input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #1db954;
+  cursor: pointer;
+}
+
 .spotify-input {
   width: 100%;
   padding: 6px 8px;
@@ -934,6 +951,7 @@ export const PANEL_CSS = `
 .spotify-modern-widget-lyrics-track {
   width: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   padding: 0 0 2px;
 }
@@ -950,6 +968,10 @@ export const PANEL_CSS = `
 }
 
 .spotify-modern-widget-lyric-line {
+  /* Reserve room before wrapping for the active line's 1.035 scale. */
+  width: calc(96% - 12px);
+  min-width: 0;
+  margin-inline: auto;
   text-align: center;
   font-size: 16px;
   line-height: 1.24;
@@ -957,6 +979,7 @@ export const PANEL_CSS = `
   letter-spacing: -0.018em;
   color: rgba(255, 255, 255, 0.22);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   text-wrap: pretty;
   transition: color 220ms ease, transform 220ms ease, text-shadow 220ms ease;
 }
@@ -964,11 +987,6 @@ export const PANEL_CSS = `
 .spotify-modern-widget-lyric-line-enter {
   animation: spotify-lyrics-line-in 360ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
   animation-delay: var(--spotify-modern-lyric-enter-delay, 0ms);
-}
-
-.spotify-modern-widget-lyric-line-long {
-  max-width: calc(100% - 24px);
-  margin-inline: auto;
 }
 
 .spotify-modern-widget-lyric-line.active {
@@ -1813,9 +1831,14 @@ export const PANEL_CSS = `
 
 .spotify-lyrics-synced {
   gap: 2px;
-  scroll-behavior: smooth;
 }
 
+/* Apple Music-esque lyric motion. Focus always moves forward: the leaving line
+   contracts on a short, prompt ease-out while the arriving line springs up
+   behind it, so a sung line never lingers at full size beside its successor.
+   Only compositor-friendly properties move: opacity and transform animate,
+   while the depth blur is a static per-tier value that never re-rasterizes
+   mid-transition. */
 .spotify-lyrics-line {
   --spotify-lyrics-line-opacity: 1;
   display: block;
@@ -1828,7 +1851,9 @@ export const PANEL_CSS = `
   background: transparent;
   border-radius: 10px;
   cursor: pointer;
-  transition: color 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    opacity 320ms cubic-bezier(0.25, 0.7, 0.5, 1),
+    background 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-lyrics-line-text {
@@ -1841,9 +1866,9 @@ export const PANEL_CSS = `
   word-break: normal;
   text-wrap: pretty;
   letter-spacing: -0.015em;
-  transform: translateY(0);
+  transform: translateY(0) scale(0.955);
   transform-origin: center center;
-  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), text-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1), filter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 320ms cubic-bezier(0.25, 0.7, 0.5, 1);
 }
 
 .spotify-lyrics-line-text-long {
@@ -1864,12 +1889,18 @@ export const PANEL_CSS = `
   --spotify-lyrics-line-opacity: 1;
   color: var(--lumiverse-text);
   opacity: 1;
+  transition:
+    opacity 520ms cubic-bezier(0.25, 0.7, 0.5, 1),
+    background 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Only the arriving scale springs. Nothing that transforms carries a filter or
+   a paint-invalidating property, so the compositor never has to re-rasterize a
+   blurred layer mid-scale. */
 .spotify-lyrics-line-active .spotify-lyrics-line-text {
-  transform: scale(1.17);
-  text-shadow: 0 0 18px rgba(255, 255, 255, 0.1);
-  filter: brightness(1.12);
+  transform: translateY(0) scale(1.17);
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.14);
+  transition: transform 520ms cubic-bezier(0.34, 1.5, 0.5, 1);
 }
 
 .spotify-lyrics-line-tier-1 {
@@ -1918,6 +1949,24 @@ export const PANEL_CSS = `
   --spotify-lyrics-line-opacity: 0.24;
 }
 
+/* Depth blur is static and sits only on receding lines, never on the active or
+   adjacent line. A blur that animates, or that shares an element with a
+   transform, forces the compositor to re-rasterize that layer every frame and
+   leaves the text visibly soft mid-scale. These classes are emitted only while
+   the Lyrics blur setting is on, so a disabled blur leaves the text unfiltered
+   instead of carrying a no-op blur(0). */
+.spotify-lyrics-line-blur-2 .spotify-lyrics-line-text {
+  filter: blur(0.8px);
+}
+
+.spotify-lyrics-line-blur-3 .spotify-lyrics-line-text {
+  filter: blur(1.5px);
+}
+
+.spotify-lyrics-line-blur-4 .spotify-lyrics-line-text {
+  filter: blur(2.2px);
+}
+
 .spotify-lyrics-line-blank {
   min-height: 22px;
   --spotify-lyrics-line-opacity: 0.18;
@@ -1951,11 +2000,16 @@ export const PANEL_CSS = `
   }
 }
 
+/* The blur-in radius is a variable so the Lyrics blur setting can zero it
+   without a second copy of the motion. A custom property inside @keyframes is
+   substituted when the animation starts, which is the only moment that
+   matters here: the element is created, and the setting read, before it is
+   inserted. */
 @keyframes spotify-lyrics-line-in {
   from {
     opacity: 0;
     transform: translateY(16px);
-    filter: blur(8px);
+    filter: blur(var(--spotify-lyrics-enter-blur, 8px));
   }
 
   to {
@@ -1969,7 +2023,7 @@ export const PANEL_CSS = `
   from {
     opacity: 0;
     transform: translateY(10px);
-    filter: blur(6px);
+    filter: blur(var(--spotify-lyrics-enter-blur, 6px));
   }
 
   to {
@@ -1981,6 +2035,7 @@ export const PANEL_CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .spotify-lyrics-line,
+  .spotify-lyrics-line .spotify-lyrics-line-text,
   .spotify-lyrics-text,
   .spotify-lyrics-status-loading {
     animation: none !important;

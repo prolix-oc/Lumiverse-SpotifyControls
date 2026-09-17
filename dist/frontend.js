@@ -95,6 +95,23 @@ var PANEL_CSS = `
   align-items: center;
 }
 
+.spotify-settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--lumiverse-text-muted);
+  cursor: pointer;
+}
+
+.spotify-settings-check input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #1db954;
+  cursor: pointer;
+}
+
 .spotify-input {
   width: 100%;
   padding: 6px 8px;
@@ -935,6 +952,7 @@ var PANEL_CSS = `
 .spotify-modern-widget-lyrics-track {
   width: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   padding: 0 0 2px;
 }
@@ -951,6 +969,10 @@ var PANEL_CSS = `
 }
 
 .spotify-modern-widget-lyric-line {
+  /* Reserve room before wrapping for the active line's 1.035 scale. */
+  width: calc(96% - 12px);
+  min-width: 0;
+  margin-inline: auto;
   text-align: center;
   font-size: 16px;
   line-height: 1.24;
@@ -958,6 +980,7 @@ var PANEL_CSS = `
   letter-spacing: -0.018em;
   color: rgba(255, 255, 255, 0.22);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   text-wrap: pretty;
   transition: color 220ms ease, transform 220ms ease, text-shadow 220ms ease;
 }
@@ -965,11 +988,6 @@ var PANEL_CSS = `
 .spotify-modern-widget-lyric-line-enter {
   animation: spotify-lyrics-line-in 360ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
   animation-delay: var(--spotify-modern-lyric-enter-delay, 0ms);
-}
-
-.spotify-modern-widget-lyric-line-long {
-  max-width: calc(100% - 24px);
-  margin-inline: auto;
 }
 
 .spotify-modern-widget-lyric-line.active {
@@ -1814,9 +1832,14 @@ var PANEL_CSS = `
 
 .spotify-lyrics-synced {
   gap: 2px;
-  scroll-behavior: smooth;
 }
 
+/* Apple Music-esque lyric motion. Focus always moves forward: the leaving line
+   contracts on a short, prompt ease-out while the arriving line springs up
+   behind it, so a sung line never lingers at full size beside its successor.
+   Only compositor-friendly properties move: opacity and transform animate,
+   while the depth blur is a static per-tier value that never re-rasterizes
+   mid-transition. */
 .spotify-lyrics-line {
   --spotify-lyrics-line-opacity: 1;
   display: block;
@@ -1829,7 +1852,9 @@ var PANEL_CSS = `
   background: transparent;
   border-radius: 10px;
   cursor: pointer;
-  transition: color 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    opacity 320ms cubic-bezier(0.25, 0.7, 0.5, 1),
+    background 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .spotify-lyrics-line-text {
@@ -1842,9 +1867,9 @@ var PANEL_CSS = `
   word-break: normal;
   text-wrap: pretty;
   letter-spacing: -0.015em;
-  transform: translateY(0);
+  transform: translateY(0) scale(0.955);
   transform-origin: center center;
-  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), text-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1), filter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 320ms cubic-bezier(0.25, 0.7, 0.5, 1);
 }
 
 .spotify-lyrics-line-text-long {
@@ -1865,12 +1890,18 @@ var PANEL_CSS = `
   --spotify-lyrics-line-opacity: 1;
   color: var(--lumiverse-text);
   opacity: 1;
+  transition:
+    opacity 520ms cubic-bezier(0.25, 0.7, 0.5, 1),
+    background 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Only the arriving scale springs. Nothing that transforms carries a filter or
+   a paint-invalidating property, so the compositor never has to re-rasterize a
+   blurred layer mid-scale. */
 .spotify-lyrics-line-active .spotify-lyrics-line-text {
-  transform: scale(1.17);
-  text-shadow: 0 0 18px rgba(255, 255, 255, 0.1);
-  filter: brightness(1.12);
+  transform: translateY(0) scale(1.17);
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.14);
+  transition: transform 520ms cubic-bezier(0.34, 1.5, 0.5, 1);
 }
 
 .spotify-lyrics-line-tier-1 {
@@ -1919,6 +1950,24 @@ var PANEL_CSS = `
   --spotify-lyrics-line-opacity: 0.24;
 }
 
+/* Depth blur is static and sits only on receding lines, never on the active or
+   adjacent line. A blur that animates, or that shares an element with a
+   transform, forces the compositor to re-rasterize that layer every frame and
+   leaves the text visibly soft mid-scale. These classes are emitted only while
+   the Lyrics blur setting is on, so a disabled blur leaves the text unfiltered
+   instead of carrying a no-op blur(0). */
+.spotify-lyrics-line-blur-2 .spotify-lyrics-line-text {
+  filter: blur(0.8px);
+}
+
+.spotify-lyrics-line-blur-3 .spotify-lyrics-line-text {
+  filter: blur(1.5px);
+}
+
+.spotify-lyrics-line-blur-4 .spotify-lyrics-line-text {
+  filter: blur(2.2px);
+}
+
 .spotify-lyrics-line-blank {
   min-height: 22px;
   --spotify-lyrics-line-opacity: 0.18;
@@ -1952,11 +2001,16 @@ var PANEL_CSS = `
   }
 }
 
+/* The blur-in radius is a variable so the Lyrics blur setting can zero it
+   without a second copy of the motion. A custom property inside @keyframes is
+   substituted when the animation starts, which is the only moment that
+   matters here: the element is created, and the setting read, before it is
+   inserted. */
 @keyframes spotify-lyrics-line-in {
   from {
     opacity: 0;
     transform: translateY(16px);
-    filter: blur(8px);
+    filter: blur(var(--spotify-lyrics-enter-blur, 8px));
   }
 
   to {
@@ -1970,7 +2024,7 @@ var PANEL_CSS = `
   from {
     opacity: 0;
     transform: translateY(10px);
-    filter: blur(6px);
+    filter: blur(var(--spotify-lyrics-enter-blur, 6px));
   }
 
   to {
@@ -1982,6 +2036,7 @@ var PANEL_CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .spotify-lyrics-line,
+  .spotify-lyrics-line .spotify-lyrics-line-text,
   .spotify-lyrics-text,
   .spotify-lyrics-status-loading {
     animation: none !important;
@@ -3190,9 +3245,9 @@ function createSyncedLyricsModel(maxLines) {
   }
   function refreshActiveLineIndex() {
     if (lyrics.length === 0) {
-      const changed2 = activeLineIndex !== -1;
+      const changed = activeLineIndex !== -1;
       activeLineIndex = -1;
-      return changed2;
+      return changed;
     }
     const progressMs = getProgressMs();
     let nextActiveLineIndex = -1;
@@ -3936,8 +3991,111 @@ function createMiniPlayerUI(sendToBackend, onExpandClick, getWidgetRect) {
   };
 }
 
-// src/ui/modern-widget-player.ts
+// src/ui/lyric-auto-scroll.ts
 var USER_SCROLL_SUPPRESS_MS = 2500;
+var SCROLL_TIME_CONSTANT_MS = 85;
+var SCROLL_MAX_SPEED_PX_PER_S = 1800;
+var SCROLL_SETTLE_PX = 0.5;
+function createLyricAutoScroller(container) {
+  let frame = null;
+  let target = null;
+  let expected = null;
+  let lastUserScrollAt = 0;
+  let suspended = false;
+  let previousFrameAt = 0;
+  function centringOffset(element) {
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = element.getBoundingClientRect();
+    const limit = Math.max(0, container.scrollHeight - container.clientHeight);
+    return Math.min(Math.max(container.scrollTop + (targetRect.top + targetRect.height / 2) - (containerRect.top + container.clientHeight / 2), 0), limit);
+  }
+  function stop() {
+    if (frame !== null)
+      cancelAnimationFrame(frame);
+    frame = null;
+    target = null;
+  }
+  function noteUserScroll() {
+    stop();
+    expected = null;
+    lastUserScrollAt = Date.now();
+  }
+  function cancel() {
+    stop();
+    expected = null;
+  }
+  function step(now) {
+    frame = null;
+    if (target === null || !target.isConnected || !container.isConnected) {
+      stop();
+      return;
+    }
+    const elapsed = Math.min(Math.max(now - previousFrameAt, 0), 100);
+    previousFrameAt = now;
+    const limit = Math.max(0, container.scrollHeight - container.clientHeight);
+    const goal = centringOffset(target);
+    const remaining = goal - container.scrollTop;
+    if (Math.abs(remaining) < SCROLL_SETTLE_PX) {
+      expected = goal;
+      container.scrollTop = goal;
+      stop();
+      return;
+    }
+    const eased = remaining * (1 - Math.exp(-elapsed / SCROLL_TIME_CONSTANT_MS));
+    const ceiling = SCROLL_MAX_SPEED_PX_PER_S * (elapsed / 1000);
+    const travel = Math.abs(eased) > ceiling ? Math.sign(eased) * ceiling : eased;
+    const next = Math.min(Math.max(container.scrollTop + travel, 0), limit);
+    expected = next;
+    container.scrollTop = next;
+    frame = requestAnimationFrame(step);
+  }
+  container.addEventListener("wheel", noteUserScroll, { passive: true });
+  container.addEventListener("touchmove", noteUserScroll, { passive: true });
+  container.addEventListener("pointerdown", noteUserScroll, { passive: true });
+  function handleScroll() {
+    if (expected !== null && Math.abs(container.scrollTop - expected) <= 1)
+      return;
+    noteUserScroll();
+  }
+  container.addEventListener("scroll", handleScroll, { passive: true });
+  return {
+    center(targetEl, options) {
+      if (suspended)
+        return;
+      if (!options?.force && Date.now() - lastUserScrollAt <= USER_SCROLL_SUPPRESS_MS)
+        return;
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        stop();
+        expected = centringOffset(targetEl);
+        container.scrollTop = expected;
+        return;
+      }
+      target = targetEl;
+      if (frame === null) {
+        previousFrameAt = performance.now();
+        frame = requestAnimationFrame(step);
+      }
+    },
+    suspend(next) {
+      if (suspended === next)
+        return false;
+      suspended = next;
+      if (suspended)
+        cancel();
+      return true;
+    },
+    cancel,
+    destroy() {
+      cancel();
+      container.removeEventListener("wheel", noteUserScroll);
+      container.removeEventListener("touchmove", noteUserScroll);
+      container.removeEventListener("pointerdown", noteUserScroll);
+      container.removeEventListener("scroll", handleScroll);
+    }
+  };
+}
+
+// src/ui/modern-widget-player.ts
 var ICON_PREV3 = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 var ICON_PLAY3 = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
 var ICON_PAUSE3 = `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
@@ -4204,10 +4362,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   let lyricsLoading = false;
   let lastRenderedLyricSignature = "";
   let syncedLyricEls = [];
-  let autoScrollTimer = null;
-  let isAutoScrolling = false;
-  let lastUserScrollAt = 0;
-  let autoScrollSuspended = false;
+  const autoScroll = createLyricAutoScroller(lyricsBody);
   let lastMetadataSignature = "";
   let marqueeRefreshTimer = null;
   let marqueeRefreshTimerLate = null;
@@ -4218,24 +4373,6 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
   });
   marqueeObserver.observe(meta);
   marqueeObserver.observe(root);
-  function stopAutoScrollTracking() {
-    if (autoScrollTimer) {
-      clearTimeout(autoScrollTimer);
-      autoScrollTimer = null;
-    }
-    isAutoScrolling = false;
-  }
-  function noteUserScroll() {
-    stopAutoScrollTracking();
-    lastUserScrollAt = Date.now();
-  }
-  lyricsBody.addEventListener("wheel", noteUserScroll, { passive: true });
-  lyricsBody.addEventListener("touchmove", noteUserScroll, { passive: true });
-  lyricsBody.addEventListener("pointerdown", noteUserScroll, { passive: true });
-  lyricsBody.addEventListener("scroll", () => {
-    if (!isAutoScrolling)
-      lastUserScrollAt = Date.now();
-  }, { passive: true });
   function refreshMarquees(restart) {
     requestAnimationFrame(() => {
       trackName.refresh(isExpandedState, restart);
@@ -4270,7 +4407,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     compactProgress.style.opacity = visible ? "1" : "0";
   }
   function clearLyricsTrack() {
-    stopAutoScrollTracking();
+    autoScroll.cancel();
     lyricsTrack.innerHTML = "";
     lyricsBody.scrollTop = 0;
     syncedLyricEls = [];
@@ -4282,9 +4419,6 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       const el = document.createElement("div");
       el.className = "spotify-modern-widget-lyric-line spotify-modern-widget-lyric-line-enter";
       el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 22, 110)}ms`);
-      if (shouldReserveScaleGutter(line.text)) {
-        el.classList.add("spotify-modern-widget-lyric-line-long");
-      }
       el.textContent = line.displayText;
       lyricsTrack.appendChild(el);
       return el;
@@ -4298,9 +4432,6 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
       if (!el)
         return;
       el.className = "spotify-modern-widget-lyric-line";
-      if (shouldReserveScaleGutter(line.text)) {
-        el.classList.add("spotify-modern-widget-lyric-line-long");
-      }
       if (line.index === activeLineIndex) {
         el.classList.add("active");
       } else if (activeLineIndex >= 0) {
@@ -4318,48 +4449,32 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];
     if (!activeEl || !shouldAutoscroll)
       return;
-    if (autoScrollSuspended)
-      return;
-    const shouldCenter = Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
-    if (!shouldCenter)
-      return;
-    requestAnimationFrame(() => {
-      const targetScrollTop = activeEl.offsetTop + activeEl.offsetHeight / 2 - lyricsBody.clientHeight / 2;
-      const maxScrollTop = Math.max(0, lyricsBody.scrollHeight - lyricsBody.clientHeight);
-      isAutoScrolling = true;
-      lyricsBody.scrollTo({
-        top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)),
-        behavior: "smooth"
-      });
-      if (autoScrollTimer)
-        clearTimeout(autoScrollTimer);
-      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
-    });
+    autoScroll.center(activeEl);
   }
   function renderLyrics() {
     clearLyricsTrack();
     if (!connected || !state) {
       lastRenderedLyricSignature = "";
-      const status2 = document.createElement("div");
-      status2.className = "spotify-modern-widget-lyrics-status";
-      status2.textContent = connected ? "Start playback to see lyrics" : "Connect Spotify to see lyrics";
-      lyricsTrack.appendChild(status2);
+      const status = document.createElement("div");
+      status.className = "spotify-modern-widget-lyrics-status";
+      status.textContent = connected ? "Start playback to see lyrics" : "Connect Spotify to see lyrics";
+      lyricsTrack.appendChild(status);
       return;
     }
     if (lyricsLoading) {
       lastRenderedLyricSignature = "loading";
-      const status2 = document.createElement("div");
-      status2.className = "spotify-modern-widget-lyrics-status spotify-modern-widget-lyrics-status-loading";
-      status2.textContent = "Loading lyrics...";
-      lyricsTrack.appendChild(status2);
+      const status = document.createElement("div");
+      status.className = "spotify-modern-widget-lyrics-status spotify-modern-widget-lyrics-status-loading";
+      status.textContent = "Loading lyrics...";
+      lyricsTrack.appendChild(status);
       return;
     }
     if (lyricsInstrumental) {
       lastRenderedLyricSignature = "instrumental";
-      const status2 = document.createElement("div");
-      status2.className = "spotify-modern-widget-lyrics-status";
-      status2.textContent = "♪ Instrumental";
-      lyricsTrack.appendChild(status2);
+      const status = document.createElement("div");
+      status.className = "spotify-modern-widget-lyrics-status";
+      status.textContent = "♪ Instrumental";
+      lyricsTrack.appendChild(status);
       return;
     }
     if (syncedLyricsModel.hasLyrics() && state.trackUri === lyricsTrackUri) {
@@ -4577,13 +4692,14 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     update,
     updateLyrics,
     setLyricsLoading,
+    setLyricsBlur(enabled) {
+      if (enabled)
+        lyricsSection.style.removeProperty("--spotify-lyrics-enter-blur");
+      else
+        lyricsSection.style.setProperty("--spotify-lyrics-enter-blur", "0px");
+    },
     setAutoScrollSuspended(suspended) {
-      if (autoScrollSuspended === suspended)
-        return;
-      autoScrollSuspended = suspended;
-      if (suspended) {
-        stopAutoScrollTracking();
-      } else if (syncedLyricsModel.hasLyrics()) {
+      if (autoScroll.suspend(suspended) && !suspended && syncedLyricsModel.hasLyrics()) {
         updateSyncedLyricsPresentation(true);
       }
     },
@@ -4600,7 +4716,7 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
     },
     destroy() {
       stopTicking();
-      stopAutoScrollTracking();
+      autoScroll.destroy();
       cleanupProgressCommit();
       cleanupVolumeCommit();
       if (marqueeRefreshTimer)
@@ -4616,11 +4732,10 @@ function createModernWidgetPlayerUI(sendToBackend, onExpandClick, onCollapseClic
 }
 
 // src/ui/lyrics.ts
-var USER_SCROLL_SUPPRESS_MS2 = 2500;
 var LOADING_STATUS_DELAY_MS = 180;
 var SEEK_SYNC_TOLERANCE_MS = 1400;
 var SEEK_STATE_GRACE_MS = 1800;
-function getLineClassName(index, activeLineIndex, hasText) {
+function getLineClassName(index, activeLineIndex, hasText, blurEnabled) {
   const classes = ["spotify-lyrics-line"];
   if (!hasText)
     classes.push("spotify-lyrics-line-blank");
@@ -4632,14 +4747,12 @@ function getLineClassName(index, activeLineIndex, hasText) {
     classes.push("spotify-lyrics-line-future");
   if (activeLineIndex >= 0) {
     const distance = Math.abs(index - activeLineIndex);
-    if (distance === 1)
-      classes.push("spotify-lyrics-line-tier-1");
-    else if (distance === 2)
-      classes.push("spotify-lyrics-line-tier-2");
-    else if (distance === 3)
-      classes.push("spotify-lyrics-line-tier-3");
-    else if (distance >= 4)
-      classes.push("spotify-lyrics-line-tier-4");
+    if (distance >= 1) {
+      const tier = Math.min(distance, 4);
+      classes.push(`spotify-lyrics-line-tier-${tier}`);
+      if (blurEnabled && tier >= 2)
+        classes.push(`spotify-lyrics-line-blur-${tier}`);
+    }
   }
   return classes.join(" ");
 }
@@ -4656,14 +4769,12 @@ function createLyricsUI(onSeek) {
   let currentTrackUri = null;
   let syncedLines = [];
   const syncedLyricsModel = createSyncedLyricsModel();
+  const autoScroll = createLyricAutoScroller(body);
   let playback = null;
   let activeLineIndex = -1;
+  let blurEnabled = true;
   let tickTimer = null;
-  let autoScrollTimer = null;
   let loadingTimer = null;
-  let isAutoScrolling = false;
-  let lastUserScrollAt = 0;
-  let autoScrollSuspended = false;
   let pendingSeekPositionMs = null;
   let pendingSeekUntil = 0;
   function stopLoadingState() {
@@ -4673,24 +4784,6 @@ function createLyricsUI(onSeek) {
     }
     body.classList.remove("spotify-lyrics-loading");
   }
-  function stopAutoScrollTracking() {
-    if (autoScrollTimer) {
-      clearTimeout(autoScrollTimer);
-      autoScrollTimer = null;
-    }
-    isAutoScrolling = false;
-  }
-  function noteUserScroll() {
-    stopAutoScrollTracking();
-    lastUserScrollAt = Date.now();
-  }
-  body.addEventListener("wheel", noteUserScroll, { passive: true });
-  body.addEventListener("touchmove", noteUserScroll, { passive: true });
-  body.addEventListener("pointerdown", noteUserScroll, { passive: true });
-  body.addEventListener("scroll", () => {
-    if (!isAutoScrolling)
-      lastUserScrollAt = Date.now();
-  }, { passive: true });
   function stopTicking() {
     if (tickTimer) {
       clearInterval(tickTimer);
@@ -4702,29 +4795,23 @@ function createLyricsUI(onSeek) {
       return;
     tickTimer = setInterval(updateActiveLine, 200);
   }
-  function centerLine(line, behavior = "smooth") {
-    requestAnimationFrame(() => {
-      const bodyRect = body.getBoundingClientRect();
-      const textRect = line.textEl.getBoundingClientRect();
-      const targetScrollTop = body.scrollTop + (textRect.top + textRect.height / 2) - (bodyRect.top + body.clientHeight / 2);
-      const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
-      body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior });
+  function refreshLineClasses() {
+    syncedLines.forEach((line) => {
+      line.el.className = getLineClassName(line.index, activeLineIndex, Boolean(line.text), blurEnabled);
     });
   }
-  function updateLineClasses(nextActiveLineIndex, options = {}) {
+  function applyEnterBlur() {
+    if (blurEnabled)
+      root.style.removeProperty("--spotify-lyrics-enter-blur");
+    else
+      root.style.setProperty("--spotify-lyrics-enter-blur", "0px");
+  }
+  function updateLineClasses(nextActiveLineIndex, forceCenter = false) {
     activeLineIndex = nextActiveLineIndex;
-    syncedLines.forEach((line, index) => {
-      line.el.className = getLineClassName(line.index, activeLineIndex, Boolean(line.text));
-    });
+    refreshLineClasses();
     const activeLine = syncedLines.find((line) => line.index === activeLineIndex);
-    const shouldCenter = !autoScrollSuspended && (options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS2);
-    if (activeLine && shouldCenter) {
-      isAutoScrolling = true;
-      if (autoScrollTimer)
-        clearTimeout(autoScrollTimer);
-      centerLine(activeLine, options.behavior);
-      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
-    }
+    if (activeLine)
+      autoScroll.center(activeLine.textEl, { force: forceCenter });
   }
   function updateActiveLine() {
     if (syncedLines.length === 0)
@@ -4735,7 +4822,7 @@ function createLyricsUI(onSeek) {
   }
   function clear() {
     stopTicking();
-    stopAutoScrollTracking();
+    autoScroll.cancel();
     stopLoadingState();
     body.innerHTML = "";
     body.className = "spotify-lyrics-body";
@@ -4753,7 +4840,7 @@ function createLyricsUI(onSeek) {
       return;
     if (loading) {
       stopTicking();
-      stopAutoScrollTracking();
+      autoScroll.cancel();
       body.innerHTML = "";
       body.className = "spotify-lyrics-body spotify-lyrics-loading";
       syncedLines = [];
@@ -4779,7 +4866,7 @@ function createLyricsUI(onSeek) {
     syncedLines = snapshot.lines.map((line, renderIndex) => {
       const el = document.createElement("div");
       const textEl = document.createElement("div");
-      el.className = getLineClassName(line.index, activeLineIndex, line.hasText);
+      el.className = getLineClassName(line.index, activeLineIndex, line.hasText, blurEnabled);
       el.classList.add("spotify-lyrics-line-enter");
       el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(renderIndex * 28, 280)}ms`);
       textEl.className = "spotify-lyrics-line-text";
@@ -4800,7 +4887,7 @@ function createLyricsUI(onSeek) {
           };
           syncedLyricsModel.setPlayback(playback);
         }
-        updateLineClasses(line.index, { forceCenter: true, behavior: "smooth" });
+        updateLineClasses(line.index, true);
         onSeek?.(line.timeMs);
       });
       body.appendChild(el);
@@ -4820,7 +4907,7 @@ function createLyricsUI(onSeek) {
   }
   function update(trackUri, plainLyrics, syncedLyrics, instrumental) {
     stopTicking();
-    stopAutoScrollTracking();
+    autoScroll.cancel();
     stopLoadingState();
     currentTrackUri = trackUri;
     body.innerHTML = "";
@@ -4890,19 +4977,21 @@ function createLyricsUI(onSeek) {
     updatePlayback,
     setLoading,
     setAutoScrollSuspended(suspended) {
-      if (autoScrollSuspended === suspended)
-        return;
-      autoScrollSuspended = suspended;
-      if (suspended) {
-        stopAutoScrollTracking();
-      } else if (syncedLines.length > 0) {
-        updateLineClasses(activeLineIndex, { forceCenter: true });
+      if (autoScroll.suspend(suspended) && !suspended && syncedLines.length) {
+        updateLineClasses(activeLineIndex, true);
       }
+    },
+    setBlurEnabled(enabled) {
+      if (blurEnabled === enabled)
+        return;
+      blurEnabled = enabled;
+      applyEnterBlur();
+      refreshLineClasses();
     },
     clear,
     destroy() {
       stopTicking();
-      stopAutoScrollTracking();
+      autoScroll.destroy();
       stopLoadingState();
       root.remove();
     }
@@ -5405,6 +5494,7 @@ function setup(ctx) {
       shape: prefs?.shape === "squircle" ? "squircle" : "circle",
       sizeMode,
       miniPlayerStyle,
+      lyricsBlur: prefs?.lyricsBlur !== false,
       x: typeof prefs?.x === "number" ? prefs.x : undefined,
       y: typeof prefs?.y === "number" ? prefs.y : undefined
     };
@@ -5413,6 +5503,7 @@ function setup(ctx) {
   let currentArtShape = "circle";
   let currentSizeMode = "medium";
   let currentMiniPlayerStyle = "default";
+  let currentLyricsBlur = true;
   let savedX;
   let savedY;
   try {
@@ -5421,6 +5512,7 @@ function setup(ctx) {
     currentArtShape = saved.shape;
     currentSizeMode = saved.sizeMode;
     currentMiniPlayerStyle = saved.miniPlayerStyle;
+    currentLyricsBlur = saved.lyricsBlur !== false;
     savedX = saved.x;
     savedY = saved.y;
   } catch {}
@@ -5432,6 +5524,7 @@ function setup(ctx) {
       shape: currentArtShape,
       sizeMode: currentSizeMode,
       miniPlayerStyle: currentMiniPlayerStyle,
+      lyricsBlur: currentLyricsBlur,
       x: pos.x,
       y: pos.y
     };
@@ -5713,6 +5806,40 @@ function setup(ctx) {
     settingsBody.appendChild(widgetSizeLabel);
   }
   updateWidgetCustomizationUI();
+  let lyricsBlurInput = null;
+  function updateLyricsBlurUI() {
+    if (lyricsBlurInput)
+      lyricsBlurInput.checked = currentLyricsBlur;
+  }
+  function applyLyricsBlur() {
+    lyricsUI.setBlurEnabled(currentLyricsBlur);
+    modernWidget.setLyricsBlur(currentLyricsBlur);
+    updateLyricsBlurUI();
+  }
+  if (settingsBody) {
+    const divider = document.createElement("div");
+    divider.style.cssText = "height:1px;background:var(--lumiverse-border);margin:4px 0";
+    const toggle = document.createElement("label");
+    toggle.className = "spotify-settings-check";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = currentLyricsBlur;
+    lyricsBlurInput = checkbox;
+    const toggleLabel = document.createElement("span");
+    toggleLabel.textContent = "Lyrics blur";
+    toggle.append(checkbox, toggleLabel);
+    const hint = document.createElement("div");
+    hint.style.cssText = "font-size:0.8em;opacity:0.65;margin-top:4px";
+    hint.textContent = "Depth-blurs receding lyric lines and fades new lines in through a blur. Turn off for crisp text.";
+    const field = document.createElement("div");
+    field.append(toggle, hint);
+    checkbox.addEventListener("change", () => {
+      currentLyricsBlur = checkbox.checked;
+      applyLyricsBlur();
+      saveWidgetPrefs();
+    });
+    settingsBody.append(divider, field);
+  }
   const tab = ctx.ui.registerDrawerTab({
     id: "spotify",
     title: "Spotify Controls",
@@ -5791,6 +5918,7 @@ function setup(ctx) {
   widgetContent.appendChild(modernWidget.root);
   widget.root.appendChild(widgetContent);
   animateWidgetMount();
+  applyLyricsBlur();
   function getModernExpandedSize() {
     if (!currentState) {
       return {
@@ -6096,7 +6224,7 @@ function setup(ctx) {
     animateWidgetMount();
     syncWidgetVisibility();
     widget.moveTo(pos.x, pos.y);
-    widget.onDragEnd((pos2) => debounceSavePosition(pos2));
+    widget.onDragEnd((pos) => debounceSavePosition(pos));
     clampWidgetPosition();
   }
   widgetContent.addEventListener("contextmenu", (e) => {
@@ -6263,10 +6391,12 @@ function setup(ctx) {
         if (!p)
           break;
         const sizeChanged = p.size !== currentWidgetSize;
-        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode || p.miniPlayerStyle !== currentMiniPlayerStyle;
+        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode || p.miniPlayerStyle !== currentMiniPlayerStyle || p.lyricsBlur !== currentLyricsBlur;
         currentArtShape = p.shape;
         currentSizeMode = p.sizeMode;
         currentMiniPlayerStyle = p.miniPlayerStyle;
+        currentLyricsBlur = p.lyricsBlur !== false;
+        applyLyricsBlur();
         updateWidgetCustomizationUI();
         if (currentMiniPlayerStyle !== "modern") {
           modernWidgetExpanded = false;

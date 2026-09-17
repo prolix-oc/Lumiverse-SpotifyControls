@@ -177,6 +177,7 @@ export function setup(ctx: SpindleFrontendContext) {
       shape: prefs?.shape === "squircle" ? "squircle" : "circle",
       sizeMode,
       miniPlayerStyle,
+      lyricsBlur: prefs?.lyricsBlur !== false,
       x: typeof prefs?.x === "number" ? prefs.x : undefined,
       y: typeof prefs?.y === "number" ? prefs.y : undefined,
     };
@@ -186,6 +187,7 @@ export function setup(ctx: SpindleFrontendContext) {
   let currentArtShape: ArtShape = "circle";
   let currentSizeMode: SizeMode = "medium";
   let currentMiniPlayerStyle: MiniPlayerStyle = "default";
+  let currentLyricsBlur = true;
   let savedX: number | undefined;
   let savedY: number | undefined;
   try {
@@ -194,6 +196,7 @@ export function setup(ctx: SpindleFrontendContext) {
     currentArtShape = saved.shape;
     currentSizeMode = saved.sizeMode;
     currentMiniPlayerStyle = saved.miniPlayerStyle;
+    currentLyricsBlur = saved.lyricsBlur !== false;
     savedX = saved.x;
     savedY = saved.y;
   } catch {}
@@ -206,6 +209,7 @@ export function setup(ctx: SpindleFrontendContext) {
       shape: currentArtShape,
       sizeMode: currentSizeMode,
       miniPlayerStyle: currentMiniPlayerStyle,
+      lyricsBlur: currentLyricsBlur,
       x: pos.x,
       y: pos.y,
     };
@@ -525,6 +529,40 @@ export function setup(ctx: SpindleFrontendContext) {
   }
   updateWidgetCustomizationUI();
 
+  let lyricsBlurInput: HTMLInputElement | null = null;
+  function updateLyricsBlurUI() {
+    if (lyricsBlurInput) lyricsBlurInput.checked = currentLyricsBlur;
+  }
+  function applyLyricsBlur() {
+    lyricsUI.setBlurEnabled(currentLyricsBlur);
+    modernWidget.setLyricsBlur(currentLyricsBlur);
+    updateLyricsBlurUI();
+  }
+  if (settingsBody) {
+    const divider = document.createElement("div");
+    divider.style.cssText = "height:1px;background:var(--lumiverse-border);margin:4px 0";
+    const toggle = document.createElement("label");
+    toggle.className = "spotify-settings-check";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = currentLyricsBlur;
+    lyricsBlurInput = checkbox;
+    const toggleLabel = document.createElement("span");
+    toggleLabel.textContent = "Lyrics blur";
+    toggle.append(checkbox, toggleLabel);
+    const hint = document.createElement("div");
+    hint.style.cssText = "font-size:0.8em;opacity:0.65;margin-top:4px";
+    hint.textContent = "Depth-blurs receding lyric lines and fades new lines in through a blur. Turn off for crisp text.";
+    const field = document.createElement("div");
+    field.append(toggle, hint);
+    checkbox.addEventListener("change", () => {
+      currentLyricsBlur = checkbox.checked;
+      applyLyricsBlur();
+      saveWidgetPrefs();
+    });
+    settingsBody.append(divider, field);
+  }
+
   // ─── Drawer Tab ──────────────────────────────────────────────────────
 
   const tab = ctx.ui.registerDrawerTab({
@@ -631,6 +669,7 @@ export function setup(ctx: SpindleFrontendContext) {
   widgetContent.appendChild(modernWidget.root);
   widget.root.appendChild(widgetContent);
   animateWidgetMount();
+  applyLyricsBlur();
 
   function getModernExpandedSize() {
     if (!currentState) {
@@ -1196,10 +1235,12 @@ export function setup(ctx: SpindleFrontendContext) {
         const p = normalizeWidgetPrefs(msg.prefs);
         if (!p) break;
         const sizeChanged = p.size !== currentWidgetSize;
-        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode || p.miniPlayerStyle !== currentMiniPlayerStyle;
+        const anyChanged = sizeChanged || p.shape !== currentArtShape || p.sizeMode !== currentSizeMode || p.miniPlayerStyle !== currentMiniPlayerStyle || p.lyricsBlur !== currentLyricsBlur;
         currentArtShape = p.shape;
         currentSizeMode = p.sizeMode;
         currentMiniPlayerStyle = p.miniPlayerStyle;
+        currentLyricsBlur = p.lyricsBlur !== false;
+        applyLyricsBlur();
         updateWidgetCustomizationUI();
         if (currentMiniPlayerStyle !== "modern") {
           modernWidgetExpanded = false;

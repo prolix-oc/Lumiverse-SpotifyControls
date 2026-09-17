@@ -1,13 +1,12 @@
 import type { PlaybackState } from "../types";
 import { createCrossfadeArt, getTrackScopedArtUrl } from "./crossfade-art";
+import { createLyricAutoScroller } from "./lyric-auto-scroll";
 import {
   createSyncedLyricsModel,
   parseSyncedLyrics,
-  shouldReserveScaleGutter,
 } from "./synced-lyrics-model";
 import { bindProgressCommitOnRelease, bindRangeCommitOnRelease } from "./release-commit";
 
-const USER_SCROLL_SUPPRESS_MS = 2500;
 
 const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`;
 const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
@@ -135,6 +134,8 @@ export interface ModernWidgetPlayerUI {
   update(state: PlaybackState | null, connected: boolean): void;
   updateLyrics(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean): void;
   setLyricsLoading(loading: boolean): void;
+  /** Turns off the blur-in of lyric lines. This player has no depth blur. */
+  setLyricsBlur(enabled: boolean): void;
   setAutoScrollSuspended(suspended: boolean): void;
   setCollapsedSize(size: number): void;
   setExpanded(expanded: boolean): void;
@@ -338,10 +339,7 @@ export function createModernWidgetPlayerUI(
   let lyricsLoading = false;
   let lastRenderedLyricSignature = "";
   let syncedLyricEls: HTMLDivElement[] = [];
-  let autoScrollTimer: ReturnType<typeof setTimeout> | null = null;
-  let isAutoScrolling = false;
-  let lastUserScrollAt = 0;
-  let autoScrollSuspended = false;
+  const autoScroll = createLyricAutoScroller(lyricsBody);
   let lastMetadataSignature = "";
   let marqueeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let marqueeRefreshTimerLate: ReturnType<typeof setTimeout> | null = null;
@@ -354,25 +352,6 @@ export function createModernWidgetPlayerUI(
   marqueeObserver.observe(meta);
   marqueeObserver.observe(root);
 
-  function stopAutoScrollTracking() {
-    if (autoScrollTimer) {
-      clearTimeout(autoScrollTimer);
-      autoScrollTimer = null;
-    }
-    isAutoScrolling = false;
-  }
-
-  function noteUserScroll() {
-    stopAutoScrollTracking();
-    lastUserScrollAt = Date.now();
-  }
-
-  lyricsBody.addEventListener("wheel", noteUserScroll, { passive: true });
-  lyricsBody.addEventListener("touchmove", noteUserScroll, { passive: true });
-  lyricsBody.addEventListener("pointerdown", noteUserScroll, { passive: true });
-  lyricsBody.addEventListener("scroll", () => {
-    if (!isAutoScrolling) lastUserScrollAt = Date.now();
-  }, { passive: true });
 
   function refreshMarquees(restart: boolean) {
     requestAnimationFrame(() => {
@@ -411,7 +390,7 @@ export function createModernWidgetPlayerUI(
   }
 
   function clearLyricsTrack() {
-    stopAutoScrollTracking();
+    autoScroll.cancel();
     lyricsTrack.innerHTML = "";
     lyricsBody.scrollTop = 0;
     syncedLyricEls = [];
@@ -424,9 +403,6 @@ export function createModernWidgetPlayerUI(
       const el = document.createElement("div");
       el.className = "spotify-modern-widget-lyric-line spotify-modern-widget-lyric-line-enter";
       el.style.setProperty("--spotify-modern-lyric-enter-delay", `${Math.min(renderIndex * 22, 110)}ms`);
-      if (shouldReserveScaleGutter(line.text)) {
-        el.classList.add("spotify-modern-widget-lyric-line-long");
-      }
       el.textContent = line.displayText;
       lyricsTrack.appendChild(el);
       return el;
@@ -440,9 +416,6 @@ export function createModernWidgetPlayerUI(
       const el = syncedLyricEls[idx];
       if (!el) return;
       el.className = "spotify-modern-widget-lyric-line";
-      if (shouldReserveScaleGutter(line.text)) {
-        el.classList.add("spotify-modern-widget-lyric-line-long");
-      }
       if (line.index === activeLineIndex) {
         el.classList.add("active");
       } else if (activeLineIndex >= 0) {
@@ -458,22 +431,9 @@ export function createModernWidgetPlayerUI(
     const activeEl = activeLineIndex >= 0 ? syncedLyricEls[activeLineIndex] : syncedLyricEls[0];
     if (!activeEl || !shouldAutoscroll) return;
 
-    // While a context menu is open, never auto-scroll — a scroll dismisses the menu.
-    if (autoScrollSuspended) return;
-    const shouldCenter = Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS;
-    if (!shouldCenter) return;
-
-    requestAnimationFrame(() => {
-      const targetScrollTop = activeEl.offsetTop + activeEl.offsetHeight / 2 - lyricsBody.clientHeight / 2;
-      const maxScrollTop = Math.max(0, lyricsBody.scrollHeight - lyricsBody.clientHeight);
-      isAutoScrolling = true;
-      lyricsBody.scrollTo({
-        top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)),
-        behavior: "smooth",
-      });
-      if (autoScrollTimer) clearTimeout(autoScrollTimer);
-      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
-    });
+    // A suspended scroller covers the open context menu case: scrolling would
+    // dismiss the menu, so the scroller stays parked until it closes.
+    autoScroll.center(activeEl);
   }
 
   function renderLyrics() {
@@ -739,12 +699,14 @@ export function createModernWidgetPlayerUI(
     update,
     updateLyrics,
     setLyricsLoading,
+    setLyricsBlur(enabled: boolean) {
+      // The lyric lines of this player are re-colored per tier but never
+      // depth-blurred, so the setting only drives their blur-in animation.
+      if (enabled) lyricsSection.style.removeProperty("--spotify-lyrics-enter-blur");
+      else lyricsSection.style.setProperty("--spotify-lyrics-enter-blur", "0px");
+    },
     setAutoScrollSuspended(suspended: boolean) {
-      if (autoScrollSuspended === suspended) return;
-      autoScrollSuspended = suspended;
-      if (suspended) {
-        stopAutoScrollTracking();
-      } else if (syncedLyricsModel.hasLyrics()) {
+      if (autoScroll.suspend(suspended) && !suspended && syncedLyricsModel.hasLyrics()) {
         // Re-center on the active line now that the menu is gone.
         updateSyncedLyricsPresentation(true);
       }
@@ -762,7 +724,7 @@ export function createModernWidgetPlayerUI(
     },
     destroy() {
       stopTicking();
-      stopAutoScrollTracking();
+      autoScroll.destroy();
       cleanupProgressCommit();
       cleanupVolumeCommit();
       if (marqueeRefreshTimer) clearTimeout(marqueeRefreshTimer);

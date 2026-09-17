@@ -343,6 +343,7 @@ function normalizeWidgetPrefs(prefs?: Partial<WidgetPrefs> | null): WidgetPrefs 
     shape: prefs?.shape === "squircle" ? "squircle" : "circle",
     sizeMode,
     miniPlayerStyle,
+    lyricsBlur: prefs?.lyricsBlur !== false,
     x: typeof prefs?.x === "number" ? prefs.x : undefined,
     y: typeof prefs?.y === "number" ? prefs.y : undefined,
   };

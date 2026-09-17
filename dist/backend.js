@@ -814,6 +814,7 @@ function normalizeWidgetPrefs(prefs) {
     shape: prefs?.shape === "squircle" ? "squircle" : "circle",
     sizeMode,
     miniPlayerStyle,
+    lyricsBlur: prefs?.lyricsBlur !== false,
     x: typeof prefs?.x === "number" ? prefs.x : undefined,
     y: typeof prefs?.y === "number" ? prefs.y : undefined
   };
@@ -1749,14 +1750,14 @@ async function realignAfterSwipeDelete(chatId, message, deletedIndex, userId) {
   const map = readSongMap(meta);
   if (Object.keys(map).length === 0)
     return;
-  const next2 = {};
+  const next = {};
   for (const [k, v] of Object.entries(map)) {
     const idx = Number(k);
     if (idx === deletedIndex)
       continue;
-    next2[idx > deletedIndex ? idx - 1 : idx] = v;
+    next[idx > deletedIndex ? idx - 1 : idx] = v;
   }
-  meta[SONG_META_KEY] = { bySwipe: next2 };
+  meta[SONG_META_KEY] = { bySwipe: next };
   try {
     await spindle.chat.updateMessage(chatId, message.id, { metadata: meta, skipChunkRebuild: true });
   } catch (err) {
@@ -2627,17 +2628,17 @@ spindle.on("TOOL_INVOCATION", async (payload) => {
         if (mode === "playlist") {
           const playlists = await searchPlaylists(query);
           if (playlists.length > 0) {
-            const best2 = playlists[0];
-            guardPlaybackMutation(`playlist play for "${best2.name}"`);
-            await play({ contextUri: best2.uri });
+            const best = playlists[0];
+            guardPlaybackMutation(`playlist play for "${best.name}"`);
+            await play({ contextUri: best.uri });
             pushStateAfterCommand(sessionUserId);
-            const others2 = playlists.slice(1, 5).map((p, i) => `${i + 2}. "${p.name}" by ${p.owner} (${p.trackCount} tracks)`).join(`
+            const others = playlists.slice(1, 5).map((p, i) => `${i + 2}. "${p.name}" by ${p.owner} (${p.trackCount} tracks)`).join(`
 `);
-            const prefix2 = council ? `[Matched mood "${query}"] ` : "";
-            return `${prefix2}Now playing playlist "${best2.name}" by ${best2.owner} (${best2.trackCount} tracks)${others2 ? `
+            const prefix = council ? `[Matched mood "${query}"] ` : "";
+            return `${prefix}Now playing playlist "${best.name}" by ${best.owner} (${best.trackCount} tracks)${others ? `
 
 Other matches:
-${others2}` : ""}`;
+${others}` : ""}`;
           }
         }
         const results = await search(query);

@@ -1,10 +1,9 @@
 import type { PlaybackState } from "../types";
+import { createLyricAutoScroller } from "./lyric-auto-scroll";
 import {
   createSyncedLyricsModel,
   parseSyncedLyrics,
-  getLineDisplayText,
   shouldReserveScaleGutter,
-  type ParsedSyncedLyricLine,
 } from "./synced-lyrics-model";
 
 export interface LyricsUI {
@@ -13,6 +12,8 @@ export interface LyricsUI {
   updatePlayback(state: PlaybackState | null): void;
   setLoading(loading: boolean): void;
   setAutoScrollSuspended(suspended: boolean): void;
+  /** Turns the receding-line depth blur and the blur-in animation on or off. */
+  setBlurEnabled(enabled: boolean): void;
   clear(): void;
   destroy(): void;
 }
@@ -33,17 +34,12 @@ interface LyricsPlayback {
   updatedAt: number;
 }
 
-const USER_SCROLL_SUPPRESS_MS = 2500;
 const LOADING_STATUS_DELAY_MS = 180;
 const SEEK_SYNC_TOLERANCE_MS = 1400;
 const SEEK_STATE_GRACE_MS = 1800;
 
-interface UpdateLineClassesOptions {
-  forceCenter?: boolean;
-  behavior?: ScrollBehavior;
-}
 
-function getLineClassName(index: number, activeLineIndex: number, hasText: boolean): string {
+function getLineClassName(index: number, activeLineIndex: number, hasText: boolean, blurEnabled: boolean): string {
   const classes = ["spotify-lyrics-line"];
   if (!hasText) classes.push("spotify-lyrics-line-blank");
   if (index === activeLineIndex) classes.push("spotify-lyrics-line-active");
@@ -51,10 +47,13 @@ function getLineClassName(index: number, activeLineIndex: number, hasText: boole
   else classes.push("spotify-lyrics-line-future");
   if (activeLineIndex >= 0) {
     const distance = Math.abs(index - activeLineIndex);
-    if (distance === 1) classes.push("spotify-lyrics-line-tier-1");
-    else if (distance === 2) classes.push("spotify-lyrics-line-tier-2");
-    else if (distance === 3) classes.push("spotify-lyrics-line-tier-3");
-    else if (distance >= 4) classes.push("spotify-lyrics-line-tier-4");
+    if (distance >= 1) {
+      const tier = Math.min(distance, 4);
+      classes.push(`spotify-lyrics-line-tier-${tier}`);
+      // The active line and its neighbour stay sharp so the eye has a crisp
+      // edge to land on; blur only starts two lines out.
+      if (blurEnabled && tier >= 2) classes.push(`spotify-lyrics-line-blur-${tier}`);
+    }
   }
   return classes.join(" ");
 }
@@ -75,14 +74,12 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
   let currentTrackUri: string | null = null;
   let syncedLines: SyncedLyricLine[] = [];
   const syncedLyricsModel = createSyncedLyricsModel();
+  const autoScroll = createLyricAutoScroller(body);
   let playback: LyricsPlayback | null = null;
   let activeLineIndex = -1;
+  let blurEnabled = true;
   let tickTimer: ReturnType<typeof setInterval> | null = null;
-  let autoScrollTimer: ReturnType<typeof setTimeout> | null = null;
   let loadingTimer: ReturnType<typeof setTimeout> | null = null;
-  let isAutoScrolling = false;
-  let lastUserScrollAt = 0;
-  let autoScrollSuspended = false;
   let pendingSeekPositionMs: number | null = null;
   let pendingSeekUntil = 0;
 
@@ -94,25 +91,6 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     body.classList.remove("spotify-lyrics-loading");
   }
 
-  function stopAutoScrollTracking() {
-    if (autoScrollTimer) {
-      clearTimeout(autoScrollTimer);
-      autoScrollTimer = null;
-    }
-    isAutoScrolling = false;
-  }
-
-  function noteUserScroll() {
-    stopAutoScrollTracking();
-    lastUserScrollAt = Date.now();
-  }
-
-  body.addEventListener("wheel", noteUserScroll, { passive: true });
-  body.addEventListener("touchmove", noteUserScroll, { passive: true });
-  body.addEventListener("pointerdown", noteUserScroll, { passive: true });
-  body.addEventListener("scroll", () => {
-    if (!isAutoScrolling) lastUserScrollAt = Date.now();
-  }, { passive: true });
 
   function stopTicking() {
     if (tickTimer) {
@@ -126,31 +104,20 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     tickTimer = setInterval(updateActiveLine, 200);
   }
 
-  function centerLine(line: SyncedLyricLine, behavior: ScrollBehavior = "smooth") {
-    requestAnimationFrame(() => {
-      const bodyRect = body.getBoundingClientRect();
-      const textRect = line.textEl.getBoundingClientRect();
-      const targetScrollTop = body.scrollTop + (textRect.top + textRect.height / 2) - (bodyRect.top + body.clientHeight / 2);
-      const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
-      body.scrollTo({ top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)), behavior });
+  function refreshLineClasses() {
+    syncedLines.forEach((line) => {
+      line.el.className = getLineClassName(line.index, activeLineIndex, Boolean(line.text), blurEnabled);
     });
   }
-
-  function updateLineClasses(nextActiveLineIndex: number, options: UpdateLineClassesOptions = {}) {
+  function applyEnterBlur() {
+    if (blurEnabled) root.style.removeProperty("--spotify-lyrics-enter-blur");
+    else root.style.setProperty("--spotify-lyrics-enter-blur", "0px");
+  }
+  function updateLineClasses(nextActiveLineIndex: number, forceCenter = false) {
     activeLineIndex = nextActiveLineIndex;
-    syncedLines.forEach((line, index) => {
-      line.el.className = getLineClassName(line.index, activeLineIndex, Boolean(line.text));
-    });
-
+    refreshLineClasses();
     const activeLine = syncedLines.find((line) => line.index === activeLineIndex);
-    // While a context menu is open, never auto-scroll — a scroll dismisses the menu.
-    const shouldCenter = !autoScrollSuspended && (options.forceCenter || Date.now() - lastUserScrollAt > USER_SCROLL_SUPPRESS_MS);
-    if (activeLine && shouldCenter) {
-      isAutoScrolling = true;
-      if (autoScrollTimer) clearTimeout(autoScrollTimer);
-      centerLine(activeLine, options.behavior);
-      autoScrollTimer = setTimeout(stopAutoScrollTracking, 700);
-    }
+    if (activeLine) autoScroll.center(activeLine.textEl, { force: forceCenter });
   }
 
   function updateActiveLine() {
@@ -163,7 +130,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
 
   function clear() {
     stopTicking();
-    stopAutoScrollTracking();
+    autoScroll.cancel();
     stopLoadingState();
     body.innerHTML = "";
     body.className = "spotify-lyrics-body";
@@ -182,7 +149,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
 
     if (loading) {
       stopTicking();
-      stopAutoScrollTracking();
+      autoScroll.cancel();
       body.innerHTML = "";
       body.className = "spotify-lyrics-body spotify-lyrics-loading";
       syncedLines = [];
@@ -208,7 +175,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     syncedLines = snapshot.lines.map((line, renderIndex) => {
       const el = document.createElement("div");
       const textEl = document.createElement("div");
-      el.className = getLineClassName(line.index, activeLineIndex, line.hasText);
+      el.className = getLineClassName(line.index, activeLineIndex, line.hasText, blurEnabled);
       el.classList.add("spotify-lyrics-line-enter");
       el.style.setProperty("--spotify-lyrics-enter-delay", `${Math.min(renderIndex * 28, 280)}ms`);
       textEl.className = "spotify-lyrics-line-text";
@@ -227,7 +194,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
           };
           syncedLyricsModel.setPlayback(playback);
         }
-        updateLineClasses(line.index, { forceCenter: true, behavior: "smooth" });
+        updateLineClasses(line.index, true);
         onSeek?.(line.timeMs);
       });
       body.appendChild(el);
@@ -248,7 +215,7 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
 
   function update(trackUri: string | null, plainLyrics: string | null, syncedLyrics: string | null, instrumental: boolean) {
     stopTicking();
-    stopAutoScrollTracking();
+    autoScroll.cancel();
     stopLoadingState();
     currentTrackUri = trackUri;
     body.innerHTML = "";
@@ -325,19 +292,20 @@ export function createLyricsUI(onSeek?: (positionMs: number) => void): LyricsUI 
     updatePlayback,
     setLoading,
     setAutoScrollSuspended(suspended: boolean) {
-      if (autoScrollSuspended === suspended) return;
-      autoScrollSuspended = suspended;
-      if (suspended) {
-        stopAutoScrollTracking();
-      } else if (syncedLines.length > 0) {
-        // Re-center on the active line now that the menu is gone.
-        updateLineClasses(activeLineIndex, { forceCenter: true });
+      if (autoScroll.suspend(suspended) && !suspended && syncedLines.length) {
+        updateLineClasses(activeLineIndex, true);
       }
+    },
+    setBlurEnabled(enabled: boolean) {
+      if (blurEnabled === enabled) return;
+      blurEnabled = enabled;
+      applyEnterBlur();
+      refreshLineClasses();
     },
     clear,
     destroy() {
       stopTicking();
-      stopAutoScrollTracking();
+      autoScroll.destroy();
       stopLoadingState();
       root.remove();
     },
