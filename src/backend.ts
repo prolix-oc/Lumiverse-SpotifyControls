@@ -210,9 +210,24 @@ async function createCodeChallenge(verifier: string): Promise<string> {
   return base64UrlEncode(new Uint8Array(digest));
 }
 
+/**
+ * Resolve the redirect URI for the Spotify authorization round trip.
+ *
+ * Spotify accepts https origins and http loopback as redirect URIs. When the
+ * extension UI is served over https (desktop custom URL, cloud host) or from
+ * loopback, that exact origin also serves the OAuth callback route, so it is
+ * used verbatim — the desktop webview's origin carries no port, so deriving
+ * the port from it strands the callback on port 80. Plain-http non-loopback
+ * clients (LAN IPs, phones) cannot be https redirect URIs, so their base is
+ * rewritten to loopback on the same port; those users finish authorization
+ * with the settings paste fallback.
+ */
 function getLoopbackRedirectUri(serverBaseUrl: string): string {
   const url = new URL(serverBaseUrl);
-  url.hostname = "127.0.0.1";
+  const isLoopback = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  if (url.protocol !== "https:" && !isLoopback) {
+    url.hostname = "127.0.0.1";
+  }
   return url.origin + spindle.oauth.getCallbackUrl();
 }
 

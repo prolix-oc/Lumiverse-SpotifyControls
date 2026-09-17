@@ -707,7 +707,10 @@ async function createCodeChallenge(verifier) {
 }
 function getLoopbackRedirectUri(serverBaseUrl) {
   const url = new URL(serverBaseUrl);
-  url.hostname = "127.0.0.1";
+  const isLoopback = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  if (url.protocol !== "https:" && !isLoopback) {
+    url.hostname = "127.0.0.1";
+  }
   return url.origin + spindle.oauth.getCallbackUrl();
 }
 var MIGRATION_FLAG = "enclave_migration_done.json";

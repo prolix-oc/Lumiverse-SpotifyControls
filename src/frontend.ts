@@ -224,14 +224,6 @@ export function setup(ctx: SpindleFrontendContext) {
     savePositionTimer = setTimeout(saveWidgetPrefs, 500);
   }
 
-  // Use a loopback redirect URI so Spotify app setup does not depend on the
-  // browser origin (LAN IP, cloud hostname, phone, etc.). Non-origin clients can
-  // paste the failed loopback callback URL back into settings to finish auth.
-  function getServerBaseUrl(): string {
-    const { port } = window.location;
-    return `http://127.0.0.1${port ? `:${port}` : ""}`;
-  }
-
   // Send helper
   function clearExpiredOptimisticState(now = Date.now()) {
     if (pendingSeekCommit && now > pendingSeekCommit.expiresAt) pendingSeekCommit = null;
@@ -437,7 +429,12 @@ export function setup(ctx: SpindleFrontendContext) {
   // ─── Settings (in settings_extensions mount) ──────────────────────────
 
   const settingsMount = ctx.ui.mount("settings_extensions");
-  const settingsUI = createSettingsUI(sendToBackend, getServerBaseUrl, async (enabled) => {
+  // The origin serving this extension UI also serves the OAuth callback
+  // route. Spotify accepts https and loopback redirect URIs verbatim, which
+  // keeps desktop custom-URL and cloud origins working without port guessing.
+  // Plain-http non-loopback clients keep the loopback rewrite plus the
+  // settings paste fallback (see getLoopbackRedirectUri in backend.ts).
+  const settingsUI = createSettingsUI(sendToBackend, () => window.location.origin, async (enabled) => {
     if (enabled) {
       const granted = await ctx.permissions.getGranted();
       if (!granted.includes("interceptor")) {

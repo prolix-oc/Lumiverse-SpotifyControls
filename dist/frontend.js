@@ -5538,10 +5538,6 @@ function setup(ctx) {
       clearTimeout(savePositionTimer);
     savePositionTimer = setTimeout(saveWidgetPrefs, 500);
   }
-  function getServerBaseUrl() {
-    const { port } = window.location;
-    return `http://127.0.0.1${port ? `:${port}` : ""}`;
-  }
   function clearExpiredOptimisticState(now = Date.now()) {
     if (pendingSeekCommit && now > pendingSeekCommit.expiresAt)
       pendingSeekCommit = null;
@@ -5729,7 +5725,7 @@ function setup(ctx) {
     });
   }
   const settingsMount = ctx.ui.mount("settings_extensions");
-  const settingsUI = createSettingsUI(sendToBackend, getServerBaseUrl, async (enabled) => {
+  const settingsUI = createSettingsUI(sendToBackend, () => window.location.origin, async (enabled) => {
     if (enabled) {
       const granted = await ctx.permissions.getGranted();
       if (!granted.includes("interceptor")) {
