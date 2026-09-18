@@ -5367,6 +5367,33 @@ function createSongBadgeManager(ctx, sendToBackend) {
   };
 }
 
+// src/ui/modern-widget-layout.ts
+var VIEWPORT_PADDING = 24;
+var EMPTY_SIZE = { width: 320, height: 196 };
+var PLAYBACK_SIZE = { width: 348, height: 520 };
+var EMPTY_MIN_WIDTH = 280;
+var PLAYBACK_MIN_SIZE = { width: 300, height: 420 };
+function getModernWidgetExpandedSize({
+  desktopPopout,
+  hasPlayback,
+  viewportHeight,
+  viewportWidth
+}) {
+  const preferred = hasPlayback ? PLAYBACK_SIZE : EMPTY_SIZE;
+  if (desktopPopout)
+    return { ...preferred };
+  if (!hasPlayback) {
+    return {
+      width: Math.max(EMPTY_MIN_WIDTH, Math.min(preferred.width, viewportWidth - VIEWPORT_PADDING)),
+      height: preferred.height
+    };
+  }
+  return {
+    width: Math.max(PLAYBACK_MIN_SIZE.width, Math.min(preferred.width, viewportWidth - VIEWPORT_PADDING)),
+    height: Math.max(PLAYBACK_MIN_SIZE.height, Math.min(preferred.height, viewportHeight - VIEWPORT_PADDING))
+  };
+}
+
 // src/frontend.ts
 var SPOTIFY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.857zm1.224-2.719a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 01-.973-.517.781.781 0 01.517-.972c3.632-1.102 8.147-.568 11.236 1.327a.78.78 0 01.257 1.071zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 11-.543-1.791c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.613z"/></svg>`;
 var MUSIC_NOTE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
@@ -5435,6 +5462,7 @@ function createReadyGate(ctx) {
 function setup(ctx) {
   const readyGate = createReadyGate(ctx);
   const cleanups = [];
+  const isDesktopWidgetPopout = "__TAURI_INTERNALS__" in window && new URLSearchParams(window.location.search).has("desktopWidgetExtension");
   const removeStyle = ctx.dom.addStyle(PANEL_CSS);
   cleanups.push(removeStyle);
   let currentState = null;
@@ -5916,16 +5944,12 @@ function setup(ctx) {
   animateWidgetMount();
   applyLyricsBlur();
   function getModernExpandedSize() {
-    if (!currentState) {
-      return {
-        width: Math.max(280, Math.min(320, window.innerWidth - 24)),
-        height: 196
-      };
-    }
-    return {
-      width: Math.max(300, Math.min(348, window.innerWidth - 24)),
-      height: Math.max(420, Math.min(520, window.innerHeight - 24))
-    };
+    return getModernWidgetExpandedSize({
+      desktopPopout: isDesktopWidgetPopout,
+      hasPlayback: Boolean(currentState),
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth
+    });
   }
   function getWidgetLayoutSize(expanded = modernWidgetExpanded) {
     if (currentMiniPlayerStyle === "modern") {
