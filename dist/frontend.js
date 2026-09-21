@@ -5499,9 +5499,9 @@ function setup(ctx) {
   const DEFAULT_SIZE_PRESETS = { small: 36, medium: 48, large: 64 };
   const MODERN_SIZE_PRESETS = { small: 112, medium: 128, large: 144 };
   const DEFAULT_WIDGET_SIZE_MIN = 24;
-  const DEFAULT_WIDGET_SIZE_MAX = 128;
-  const MODERN_WIDGET_SIZE_MIN = 112;
-  const MODERN_WIDGET_SIZE_MAX = 192;
+  const DEFAULT_WIDGET_SIZE_MAX = 256;
+  const MODERN_WIDGET_SIZE_MIN = 96;
+  const MODERN_WIDGET_SIZE_MAX = 256;
   const PREFS_KEY = "spotify-controls-widget-prefs";
   function getSizePresets(style) {
     return style === "modern" ? MODERN_SIZE_PRESETS : DEFAULT_SIZE_PRESETS;
@@ -5802,7 +5802,7 @@ function setup(ctx) {
       widgetSizeLabelTitle.textContent = currentMiniPlayerStyle === "modern" ? "Collapsed Modern Player Size (px)" : "Custom Widget Size (px)";
     }
     if (widgetSizeHint) {
-      widgetSizeHint.textContent = currentMiniPlayerStyle === "modern" ? "Controls the compact size of the modern player before it expands." : "Controls the floating widget size.";
+      widgetSizeHint.textContent = currentMiniPlayerStyle === "modern" ? `Controls the compact size of the modern player before it expands (${min}–${max}px).` : `Controls the floating widget size (${min}–${max}px).`;
     }
     if (widgetSizeInputRef) {
       widgetSizeInputRef.min = String(min);
@@ -5827,20 +5827,28 @@ function setup(ctx) {
     const widgetSizeInput = document.createElement("input");
     widgetSizeInput.className = "spotify-input";
     widgetSizeInput.type = "number";
+    widgetSizeInput.step = "1";
     widgetSizeInput.style.width = "80px";
     widgetSizeInputRef = widgetSizeInput;
     const widgetSizeBtn = document.createElement("button");
+    widgetSizeBtn.type = "button";
     widgetSizeBtn.className = "spotify-btn spotify-btn-primary";
     widgetSizeBtn.textContent = "Apply";
     widgetSizeBtn.style.fontSize = "0.85em";
     widgetSizeBtn.style.padding = "4px 12px";
-    widgetSizeBtn.addEventListener("click", () => {
-      const val = parseInt(widgetSizeInput.value, 10);
-      const { min, max } = getSizeBounds(currentMiniPlayerStyle);
-      if (isNaN(val) || val < min || val > max)
+    const applyCustomSize = () => {
+      const value = widgetSizeInput.valueAsNumber;
+      if (!Number.isFinite(value))
         return;
       currentSizeMode = "custom";
-      recreateWidget(val);
+      recreateWidget(clampWidgetSize(Math.round(value), currentMiniPlayerStyle));
+    };
+    widgetSizeBtn.addEventListener("click", applyCustomSize);
+    widgetSizeInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter")
+        return;
+      event.preventDefault();
+      applyCustomSize();
     });
     widgetSizeRow.appendChild(widgetSizeInput);
     widgetSizeRow.appendChild(widgetSizeBtn);
