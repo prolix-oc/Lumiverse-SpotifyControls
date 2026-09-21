@@ -6371,8 +6371,7 @@ function setup(ctx) {
             const restoredPalette = restoredFromBackend ? msg.albumPalette.colors : albumPaletteCache.get(artworkKey || "");
             if (artworkKey && restoredPalette) {
               rememberAlbumPalette(artworkKey, restoredPalette);
-              if (!restoredFromBackend)
-                sendToBackend({ type: "album_colors", colors: restoredPalette, artworkKey });
+              sendToBackend({ type: "album_colors", colors: restoredPalette, artworkKey });
             } else {
               const applySeq = ++themeApplySeq;
               extractColorsFromImage(artUrl).then((colors) => {

@@ -988,7 +988,10 @@ async function applyAlbumTheme(colors: AlbumColors | null, userId?: string, artw
     if (userId && artworkKey) {
       await saveAlbumPalette(userId, artworkKey, colors);
       const session = getSession(userId);
-      if (session.activeAlbumPaletteKey === artworkKey) return;
+      // An album_colors message is a frontend-to-host synchronization point,
+      // including after the host UI reloads. Do not suppress it merely
+      // because this worker already restored the same artwork: applyPalette()
+      // is what broadcasts the override to the newly connected host UI.
       await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
       session.activeAlbumPaletteKey = artworkKey;
       return;

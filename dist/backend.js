@@ -1350,8 +1350,6 @@ async function applyAlbumTheme(colors, userId, artworkKey) {
     if (userId && artworkKey) {
       await saveAlbumPalette(userId, artworkKey, colors);
       const session = getSession(userId);
-      if (session.activeAlbumPaletteKey === artworkKey)
-        return;
       await spindle.theme.applyPalette({ accent: colors.dominantHsl }, userId);
       session.activeAlbumPaletteKey = artworkKey;
       return;
